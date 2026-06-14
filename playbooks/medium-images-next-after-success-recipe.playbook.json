@@ -1,0 +1,46 @@
+{
+  "blocked_now": true,
+  "live_apply": false,
+  "name": "medium-images-next-after-success-recipe",
+  "phase": "future",
+  "purpose": "Template for the next separate canary recipe phase.",
+  "required_before_upload": [
+    "owner decision",
+    "backup",
+    "tooling",
+    "local optimization",
+    "pre-healthcheck",
+    "minimum 3 percent savings",
+    "rollback plan"
+  ],
+  "selected_candidate": {
+    "blocked": false,
+    "blocked_reason": "",
+    "estimated_savings_high": 11732,
+    "estimated_savings_low": 3666,
+    "estimated_savings_percent_low": 5.0,
+    "format": "jpg",
+    "http_probe": {
+      "content_type": "image/jpeg",
+      "http_status": 200,
+      "method": "HEAD",
+      "ok": true,
+      "size_bytes": 73324
+    },
+    "is_previous_failed_candidate": false,
+    "is_previous_successful_candidate": false,
+    "likely_position": "below_the_fold_or_standard",
+    "previous_candidate_status": "not_tested",
+    "rank_score": 127.901,
+    "remote_path": "/wordpress/wp-content/uploads/2023/08/EXpose-of-a-Raver-Cover-Art-2.jpg",
+    "risk": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+    "selected_candidate": true,
+    "size_bytes": 73324,
+    "source_type": "internal",
+    "sources": [
+      "dryrun_report",
+      "previous_selector"
+    ],
+    "url": "https://electri-c-ity-studios-24-7.com/wp-content/uploads/2023/08/EXpose-of-a-Raver-Cover-Art-2.jpg"
+  }
+}
