@@ -1,0 +1,76 @@
+{
+  "allowed_current_levels": [
+    "LEVEL_1_DRAFT_ONLY",
+    "LEVEL_2_LOW_RISK_PREP_PREVIEW"
+  ],
+  "current_level": "LEVEL_2_LOW_RISK_PREP_PREVIEW",
+  "emergency_stop": true,
+  "kind": "roadmap",
+  "levels": [
+    {
+      "level": "LEVEL_1_DRAFT_ONLY",
+      "prerequisites": [],
+      "state": "current_safe_baseline",
+      "summary": "Read-only plus Drafts und Owner Review Packs. Kein Live Apply.",
+      "title": "Draft Only"
+    },
+    {
+      "level": "LEVEL_2_LOW_RISK_PREP_PREVIEW",
+      "prerequisites": [],
+      "state": "current_control_plane_preview",
+      "summary": "Read-only, Drafts und LOW-RISK Prepare-Vorschau. Kein Live Apply ohne Owner.",
+      "title": "Low-Risk Prep Preview"
+    },
+    {
+      "level": "LEVEL_3_LOW_RISK_APPLY_GATED",
+      "prerequisites": [
+        "emergency_stop reviewed",
+        "owner policy signed",
+        "allowlist defined",
+        "backup/healthcheck/rollback tested",
+        "Git checkpoint required",
+        "no HIGH",
+        "no MEDIUM without explicit approval"
+      ],
+      "state": "future_only",
+      "summary": "Spaeter: LOW-RISK Apply nur aus Allowlist, owner-freigegeben.",
+      "title": "Low-Risk Apply (Gated)"
+    },
+    {
+      "level": "LEVEL_4_MEDIUM_CANARY_ONLY",
+      "prerequisites": [
+        "one candidate at a time",
+        "owner gate",
+        "rollback mandatory",
+        "no mass apply"
+      ],
+      "state": "future_only",
+      "summary": "Spaeter: einzelne Canary-Aktionen, owner-gated.",
+      "title": "Medium Canary Only"
+    },
+    {
+      "level": "LEVEL_5_HIGH_REVIEW_ONLY",
+      "prerequisites": [
+        "permanently review-only"
+      ],
+      "state": "permanent",
+      "summary": "HIGH bleibt dauerhaft review-only, niemals automatischer Apply.",
+      "title": "High Review Only"
+    }
+  ],
+  "live_apply": false,
+  "name": "sentinel-safe-autonomy-roadmap",
+  "note": "LEVEL_3/LEVEL_4 future-only; never auto-enabled by this module.",
+  "principles": [
+    "Sentinel is not a reckless autopilot.",
+    "Diagnosis first.",
+    "Review before sensitive action.",
+    "Backup before apply.",
+    "Healthcheck before and after.",
+    "Rollback plan ready.",
+    "HIGH-risk never automatic.",
+    "MEDIUM only as a single Canary with an Owner Gate.",
+    "LOW only allowlisted and prepared (non-productive).",
+    "Live apply remains off unless explicitly enabled in a later, reviewed phase."
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "applies_anything": false,
+  "current_level": "LEVEL_2_LOW_RISK_PREP_PREVIEW",
+  "emergency_stop": true,
+  "forbidden": [
+    "apply",
+    "sftp_write",
+    "db_write",
+    "cloudflare_write",
+    "service_start_enable",
+    "timer_install"
+  ],
+  "kind": "review_only_dashboard",
+  "live_apply": false,
+  "name": "sentinel-owner-dashboard",
+  "phase": "9.1",
+  "steps": [
+    {
+      "desc": "Render owner dashboard from control-plane state.",
+      "step": "build-dashboard",
+      "type": "READ_ONLY"
+    },
+    {
+      "desc": "Draft owner next actions (no apply).",
+      "step": "build-owner-next-actions",
+      "type": "DRAFT"
+    },
+    {
+      "desc": "Print dashboard status summary.",
+      "step": "status",
+      "type": "READ_ONLY"
+    }
+  ]
+}

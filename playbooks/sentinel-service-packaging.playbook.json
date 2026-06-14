@@ -1,0 +1,76 @@
+{
+  "emergency_stop": true,
+  "kind": "service_offer",
+  "live_apply": false,
+  "name": "sentinel-service-packaging",
+  "not_promised": [
+    "No guarantee of a perfect 100% PageSpeed score.",
+    "No blind autopilot and no unattended mass changes.",
+    "No HIGH-risk changes (database, themes, plugins, redirects, firewall) without explicit owner review.",
+    "No counter-attacks and no broad blocking without evidence."
+  ],
+  "packages": [
+    {
+      "changes": "keine Aenderungen",
+      "deliverables": [
+        "SEO/Performance/Security Audit-Report (Markdown + JSON)",
+        "Risk Register mit Klassifizierung",
+        "Prioritaetenliste mit empfohlener Reihenfolge",
+        "Owner-Zusammenfassung"
+      ],
+      "id": "sentinel_audit",
+      "name": "Sentinel Audit Report",
+      "risk_level": "READ_ONLY",
+      "scope": [
+        "Read-only Analyse (keine Aenderungen an der Website)",
+        "SEO-, Performance- und Security-Report",
+        "Risikoanalyse (LOW / MEDIUM / HIGH)",
+        "Priorisierte Massnahmenliste"
+      ],
+      "tagline": "Read-only Bestandsaufnahme Ihrer Website: Security, SEO und Performance auf einen Blick."
+    },
+    {
+      "changes": "nur einzelne, owner-freigegebene Canary-Schritte mit Backup/Healthcheck/Rollback",
+      "deliverables": [
+        "Audit-Report",
+        "Konkrete Optimierungs-Drafts",
+        "Owner Review Pack je Massnahme",
+        "Canary-Protokoll (Backup-, Healthcheck-, Rollback-Nachweis)"
+      ],
+      "id": "sentinel_safe_optimization",
+      "name": "Sentinel Safe Optimization",
+      "risk_level": "MEDIUM",
+      "scope": [
+        "Alles aus dem Audit",
+        "Drafts (SEO/Meta/JSON-LD/Performance) zur Freigabe",
+        "Owner Review Packs (Copy-paste-fertig)",
+        "Ausgewaehlte LOW-RISK Vorbereitungen (nicht produktiv)",
+        "Einzelne MEDIUM Canary-Optimierungen NUR mit Owner Approval",
+        "Backup, Pre/Post-Healthcheck und Rollback bei jeder Canary"
+      ],
+      "tagline": "Sichere, kontrollierte Optimierung: Drafts, Owner Review und einzelne Canary-Schritte mit Rollback."
+    },
+    {
+      "changes": "kontrollierte Micro-Optimierungen, owner-gated, mit Backup/Healthcheck/Rollback",
+      "deliverables": [
+        "Monatlicher Trend- und Status-Report",
+        "Fortschritts-Roadmap",
+        "Beobachtungs-Log (5xx/Origin/Cloudflare)",
+        "Monatliches Owner-Review-Protokoll"
+      ],
+      "id": "sentinel_monitoring_improvement",
+      "name": "Sentinel Monitoring & Improvement",
+      "risk_level": "MEDIUM",
+      "scope": [
+        "Wiederkehrende Reports",
+        "Trend-Monitoring (SEO/Performance)",
+        "5xx / Origin / Cloudflare Beobachtung (read-only)",
+        "SEO & Performance Roadmap",
+        "Kontrollierte Micro-Optimierungen (owner-gated)",
+        "Monatlicher Owner Review"
+      ],
+      "tagline": "Laufende Beobachtung und kontrollierte Verbesserung mit monatlichem Owner Review."
+    }
+  ],
+  "sales_headline": "Safe Autonomy for Your Website: Security, SEO and Speed Without the Risk of a Blind Autopilot"
+}
