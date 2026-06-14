@@ -1,0 +1,21 @@
+{
+  "allowed_remote_path": "/wordpress/wp-content/uploads/2025/11/Bildschirmfoto-vom-2025-11-26-15-21-16-1-scaled.webp",
+  "backup_sha256_required": "current_sftp_backup_sha256",
+  "blocked_gates": [
+    "html-size",
+    "inline-css",
+    "scripts",
+    "cache-expires"
+  ],
+  "gate": "images",
+  "global_live_autonomy": false,
+  "minimum_savings_percent": 3.0,
+  "name": "medium-images-new-canary-validation",
+  "phase": "8.13",
+  "validation_rules": [
+    "homepage remains 200",
+    "image count plausible",
+    "target image reachable",
+    "TTFB not massively worse"
+  ]
+}
