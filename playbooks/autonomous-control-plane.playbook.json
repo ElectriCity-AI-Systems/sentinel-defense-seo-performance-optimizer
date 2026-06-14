@@ -1,0 +1,49 @@
+{
+  "applies_anything": false,
+  "current_level": "LEVEL_2_LOW_RISK_PREP_PREVIEW",
+  "emergency_stop": true,
+  "forbidden": [
+    "apply",
+    "sftp_write",
+    "db_write",
+    "cloudflare_write",
+    "systemctl_start_enable",
+    "timer_install"
+  ],
+  "kind": "review_only_control_plane",
+  "live_apply": false,
+  "name": "autonomous-control-plane",
+  "phase": "9.0",
+  "steps": [
+    {
+      "desc": "Read reports/state/audit/playbooks/git/systemd read-only.",
+      "step": "ingest",
+      "type": "READ_ONLY"
+    },
+    {
+      "desc": "Classify every action READ_ONLY/DRAFT/LOW/MEDIUM/HIGH.",
+      "step": "classify-actions",
+      "type": "READ_ONLY"
+    },
+    {
+      "desc": "Build LEVEL_0..LEVEL_5 map; current level preview.",
+      "step": "build-autonomy-map",
+      "type": "READ_ONLY"
+    },
+    {
+      "desc": "Draft safe next actions (no apply).",
+      "step": "draft-next-actions",
+      "type": "DRAFT"
+    },
+    {
+      "desc": "Emit policy + risk register.",
+      "step": "policy-report",
+      "type": "READ_ONLY"
+    },
+    {
+      "desc": "Emit status summary.",
+      "step": "status",
+      "type": "READ_ONLY"
+    }
+  ]
+}

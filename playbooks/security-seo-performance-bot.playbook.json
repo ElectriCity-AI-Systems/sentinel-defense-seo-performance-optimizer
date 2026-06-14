@@ -1,0 +1,54 @@
+{
+  "domains": {
+    "learning": [
+      "success_patterns",
+      "blocked_patterns",
+      "regressions",
+      "stable_healthchecks",
+      "secret_scan_false_positives",
+      "git_checkpoint_success",
+      "no_go_paths"
+    ],
+    "performance": [
+      "image_candidates",
+      "webp_jpg_canary",
+      "html_size",
+      "inline_css",
+      "scripts",
+      "cache_expires",
+      "external_embeds",
+      "ai_radio_cache",
+      "5xx_origin_pressure",
+      "medium_canary_owner_gate",
+      "high_never_auto"
+    ],
+    "reliability": [
+      "5xx_diagnostics",
+      "502_504_524_classification",
+      "origin_php_or_upstream_error",
+      "cloudflare_to_origin_timeout",
+      "rolling_window_decay",
+      "low_growth_24h_evidence",
+      "no_premature_waf_rule"
+    ],
+    "security": [
+      "cloudflare_challenge_diagnosis",
+      "bot_fight_mode_interpretation",
+      "waf_high_or_owner_review",
+      "defensive_scan_observation",
+      "no_counterattack"
+    ],
+    "seo": [
+      "title_meta_canonical_og_twitter",
+      "schema_jsonld_conflicts",
+      "internal_links",
+      "content_outline_drafts",
+      "robots_sitemap_readonly",
+      "jsonld_fse_db_high_or_review_only"
+    ]
+  },
+  "emergency_stop": true,
+  "kind": "domain_model",
+  "live_apply": false,
+  "name": "security-seo-performance-bot"
+}

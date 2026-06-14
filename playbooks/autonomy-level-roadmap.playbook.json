@@ -1,0 +1,103 @@
+{
+  "allowed_current_levels": [
+    "LEVEL_1_DRAFT_ONLY",
+    "LEVEL_2_LOW_RISK_PREP_PREVIEW"
+  ],
+  "current_level": "LEVEL_2_LOW_RISK_PREP_PREVIEW",
+  "emergency_stop": true,
+  "kind": "roadmap",
+  "levels": [
+    {
+      "allows": [
+        "read_only",
+        "reports"
+      ],
+      "forbids": [
+        "drafts",
+        "low_prep",
+        "live_apply",
+        "install"
+      ],
+      "level": "LEVEL_0_OBSERVE_ONLY",
+      "summary": "Nur read-only Beobachtung und Reports. Keine Drafts."
+    },
+    {
+      "allows": [
+        "read_only",
+        "reports",
+        "drafts",
+        "owner_review_packs"
+      ],
+      "forbids": [
+        "low_prep_apply",
+        "live_apply",
+        "install"
+      ],
+      "level": "LEVEL_1_DRAFT_ONLY",
+      "summary": "Read-only plus Drafts und Owner Review Packs. Kein Live Apply."
+    },
+    {
+      "allows": [
+        "read_only",
+        "reports",
+        "drafts",
+        "low_risk_prepare",
+        "git_safe_staging_suggestions"
+      ],
+      "forbids": [
+        "live_apply",
+        "install",
+        "medium_auto_apply",
+        "high_auto_apply"
+      ],
+      "level": "LEVEL_2_LOW_RISK_PREP_PREVIEW",
+      "summary": "Read-only, Drafts und LOW-RISK Prepare/Staging-Vorschlaege. Kein Live Apply ohne Owner."
+    },
+    {
+      "allows": [
+        "low_risk_allowlist_apply_owner_gated"
+      ],
+      "forbids": [
+        "mass_apply",
+        "medium_auto_apply",
+        "high_auto_apply"
+      ],
+      "future_only": true,
+      "level": "LEVEL_3_LOW_RISK_APPLY_GATED",
+      "summary": "Nur spaeter: LOW-RISK Apply, nur Allowlist, Backup/Healthcheck/Rollback Pflicht, Owner gibt einzelne Aktionen frei."
+    },
+    {
+      "allows": [
+        "single_medium_canary_owner_gated"
+      ],
+      "forbids": [
+        "mass_apply",
+        "high_auto_apply"
+      ],
+      "future_only": true,
+      "level": "LEVEL_4_MEDIUM_CANARY_ONLY",
+      "summary": "Nur einzelne Canary-Aktionen mit Owner Approval, Backup, Pre/Post Healthcheck, Rollback. Keine Massenoptimierung."
+    },
+    {
+      "allows": [
+        "review_only",
+        "documentation"
+      ],
+      "forbids": [
+        "high_auto_apply"
+      ],
+      "level": "LEVEL_5_HIGH_REVIEW_ONLY",
+      "summary": "HIGH bleibt blockiert: nur Review/Dokumentation, niemals automatischer Apply."
+    }
+  ],
+  "live_apply": false,
+  "name": "autonomy-level-roadmap",
+  "note": "LEVEL_3+/LEVEL_4 are future-only and never auto-enabled by this module.",
+  "progression_requires": [
+    "owner_approval",
+    "backup",
+    "healthcheck",
+    "rollback",
+    "audit"
+  ]
+}
