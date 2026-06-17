@@ -1,0 +1,15 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-17T15:54:58Z",
+  "playbook": "sentinel-service-proof",
+  "read_only": true,
+  "schema_version": "service-proof-trend-9.2",
+  "status": "SERVICE_PROOF_WARNING_RANGE_STABILIZED_LOCKED",
+  "steps": [
+    "Read the daily report (CRITICAL/WARNING/OK) — read-only.",
+    "Confirm CRITICAL -> WARNING multi-day trend still valid.",
+    "Track daily 5xx fluctuation inside WARNING range; no WAF rule.",
+    "Document OK-readiness blockers and remaining 24h stable minutes.",
+    "Emit cautious proof + Payhip-safe text; never claim 100% OK."
+  ]
+}

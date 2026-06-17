@@ -1,0 +1,10 @@
+{
+  "applies_changes": false,
+  "daily_fluctuation": "WARNING_RANGE_FLUCTUATION",
+  "generated_at": "2026-06-17T15:54:58Z",
+  "multi_day_trend": "CRITICAL_TO_WARNING_STILL_VALID",
+  "no_premature_waf_rule": true,
+  "playbook": "sentinel-trend-evidence",
+  "read_only": true,
+  "schema_version": "service-proof-trend-9.2"
+}
