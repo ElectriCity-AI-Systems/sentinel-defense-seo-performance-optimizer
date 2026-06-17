@@ -1,0 +1,16 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-17T16:51:53Z",
+  "playbook": "sentinel-payhip-customer-intake",
+  "read_only": true,
+  "requests_passwords": false,
+  "schema_version": "payhip-customer-intake-delivery-9.3",
+  "status": "PAYHIP_CUSTOMER_WORKFLOW_READY_LOCKED",
+  "steps": [
+    "Buyer purchases on Payhip and receives buyer instructions.",
+    "Buyer completes the intake form (URL, package, goal; no passwords).",
+    "Owner verifies intake; requests missing info if needed.",
+    "Owner records URL/goal in internal notes (not customer-facing files)."
+  ],
+  "stores_real_customer_data": false
+}

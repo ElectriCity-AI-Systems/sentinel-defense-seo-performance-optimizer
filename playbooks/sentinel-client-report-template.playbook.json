@@ -1,0 +1,20 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-17T16:51:53Z",
+  "playbook": "sentinel-client-report-template",
+  "read_only": true,
+  "schema_version": "payhip-customer-intake-delivery-9.3",
+  "sections": [
+    "Executive Summary",
+    "Website Status",
+    "SEO Findings",
+    "Performance Findings",
+    "Security / Cloudflare Findings",
+    "Risk Classification",
+    "Safe Recommendations",
+    "Owner Review Items",
+    "Blocked High-Risk Items",
+    "Next Safe Steps",
+    "Disclaimer"
+  ]
+}

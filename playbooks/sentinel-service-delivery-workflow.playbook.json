@@ -1,0 +1,38 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-17T16:51:53Z",
+  "high_blocked": true,
+  "playbook": "sentinel-service-delivery-workflow",
+  "read_only": true,
+  "schema_version": "payhip-customer-intake-delivery-9.3",
+  "workflows": {
+    "sentinel_audit": [
+      "Check intake for completeness (URL, package, goal).",
+      "Plan a public, read-only scan (no login, no write).",
+      "Run SEO / performance / security diagnosis (read-only).",
+      "Risk classification (READ_ONLY / DRAFT / LOW / MEDIUM / HIGH).",
+      "Produce the client report.",
+      "Provide safe recommendations.",
+      "No live changes are made."
+    ],
+    "sentinel_monitoring_improvement": [
+      "Recurring monitoring plan.",
+      "Trend observation over time.",
+      "5xx / origin / Cloudflare interpretation (read-only).",
+      "SEO / performance roadmap.",
+      "Monthly owner review.",
+      "Safe improvement backlog.",
+      "No blind automation."
+    ],
+    "sentinel_safe_optimization": [
+      "Everything from the Audit Report.",
+      "Draft recommendations (no live apply).",
+      "Build an owner review pack.",
+      "Identify safe optimization candidates.",
+      "Only controlled LOW/MEDIUM canary preparation.",
+      "No HIGH actions without explicit review.",
+      "Backup / healthcheck / rollback plan for any controlled change.",
+      "Final completion report."
+    ]
+  }
+}
