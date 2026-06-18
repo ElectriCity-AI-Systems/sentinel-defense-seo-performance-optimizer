@@ -1,0 +1,24 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-18T16:19:32Z",
+  "long_description_file": "08-long-description.txt",
+  "playbook": "sentinel-payhip-copy-fields",
+  "product_title": "Sentinel Security, SEO & Performance Safe Optimization",
+  "read_only": true,
+  "schema_version": "payhip-upload-pack-export-helper-9.5",
+  "short_description_file": "07-short-description.txt",
+  "variants": [
+    {
+      "name": "Sentinel Audit Report",
+      "price": "59 EUR"
+    },
+    {
+      "name": "Sentinel Safe Optimization",
+      "price": "149 EUR"
+    },
+    {
+      "name": "Sentinel Monitoring & Improvement",
+      "price": "99 EUR"
+    }
+  ]
+}

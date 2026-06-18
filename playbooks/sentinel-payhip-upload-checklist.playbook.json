@@ -1,0 +1,19 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-18T16:19:32Z",
+  "playbook": "sentinel-payhip-upload-checklist",
+  "read_only": true,
+  "schema_version": "payhip-upload-pack-export-helper-9.5",
+  "sections": [
+    "Product title",
+    "Product cover image",
+    "Product file upload",
+    "Short description",
+    "Long description",
+    "Variants / packages",
+    "Price suggestions",
+    "Visibility",
+    "Tax / ebook settings reminder",
+    "Final safety review"
+  ]
+}

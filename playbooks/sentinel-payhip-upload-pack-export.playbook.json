@@ -1,0 +1,17 @@
+{
+  "applies_changes": false,
+  "export_files_committed": false,
+  "generated_at": "2026-06-18T16:19:32Z",
+  "payhip_product_file": "01-service-access-instructions.pdf",
+  "playbook": "sentinel-payhip-upload-pack-export",
+  "read_only": true,
+  "schema_version": "payhip-upload-pack-export-helper-9.5",
+  "status": "UPLOAD_PACK_READY_LOCKED",
+  "steps": [
+    "Read public Phase 9.4 assets (read-only).",
+    "Scan every file for server paths, IPs, secrets and forbidden claims.",
+    "Copy only safe public files into exports/payhip-upload-pack/latest + timestamp.",
+    "Write README, upload checklist, copy fields, manifest and checksums.",
+    "Optionally build a zip; never commit export files."
+  ]
+}
