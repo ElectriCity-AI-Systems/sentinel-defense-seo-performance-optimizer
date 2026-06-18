@@ -1,0 +1,37 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-18T17:04:09Z",
+  "packages": [
+    "Sentinel Audit Report",
+    "Sentinel Safe Optimization",
+    "Sentinel Monitoring & Improvement"
+  ],
+  "playbook": "sentinel-payhip-fulfillment-board",
+  "read_only": true,
+  "schema_version": "payhip-fulfillment-board-9.7",
+  "status": "FULFILLMENT_BOARD_READY_LOCKED",
+  "status_phases": [
+    "NEW_PURCHASE_MANUAL",
+    "WAITING_FOR_INTAKE",
+    "INTAKE_RECEIVED",
+    "INTAKE_REVIEWED",
+    "SCOPE_CONFIRMED",
+    "AUDIT_IN_PROGRESS",
+    "REPORT_DRAFT_READY",
+    "OWNER_REVIEW_REQUIRED",
+    "CLIENT_DELIVERY_READY",
+    "DELIVERED",
+    "COMPLETED",
+    "BLOCKED_MISSING_INFO",
+    "BLOCKED_UNSAFE_REQUEST",
+    "REFUSED_HIGH_RISK"
+  ],
+  "steps": [
+    "Open a case per Payhip order from the case template.",
+    "Move it through the status phases left to right.",
+    "Run intake review, scope & risk review, then the package workflow.",
+    "Deliver via the client report template and completion checklist.",
+    "Never store secrets; HIGH actions stay review-only."
+  ],
+  "uploads_anything": false
+}

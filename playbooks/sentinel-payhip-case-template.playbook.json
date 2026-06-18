@@ -1,0 +1,37 @@
+{
+  "applies_changes": false,
+  "do_not_store": [
+    "No passwords",
+    "No API keys",
+    "No secret tokens",
+    "No SSH keys",
+    "No FTP / SFTP access data",
+    "No database access data",
+    "No hosting account passwords",
+    "No Cloudflare account passwords",
+    "No 2FA backup codes",
+    "No payment data",
+    "No private customer documents without explicit release"
+  ],
+  "fields": [
+    "case_id",
+    "selected_package",
+    "customer_alias",
+    "contact_placeholder",
+    "website_url_placeholder",
+    "intake_status",
+    "scope_status",
+    "risk_status",
+    "delivery_status",
+    "no_password_received",
+    "secrets_received",
+    "live_apply",
+    "high_risk_blocked",
+    "notes_public",
+    "notes_internal_owner_only"
+  ],
+  "generated_at": "2026-06-18T17:04:09Z",
+  "playbook": "sentinel-payhip-case-template",
+  "read_only": true,
+  "schema_version": "payhip-fulfillment-board-9.7"
+}

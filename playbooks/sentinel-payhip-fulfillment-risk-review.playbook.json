@@ -1,0 +1,15 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-18T17:04:09Z",
+  "high_policy": "HIGH-risk actions are always BLOCKED or REVIEW_ONLY and are never applied automatically. The owner decides every HIGH item manually, with a documented safe alternative where possible.",
+  "playbook": "sentinel-payhip-fulfillment-risk-review",
+  "read_only": true,
+  "risk_classes": [
+    "READ_ONLY",
+    "DRAFT",
+    "LOW",
+    "MEDIUM",
+    "HIGH"
+  ],
+  "schema_version": "payhip-fulfillment-board-9.7"
+}
