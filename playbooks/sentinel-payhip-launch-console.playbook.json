@@ -1,0 +1,23 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-18T16:41:59Z",
+  "playbook": "sentinel-payhip-launch-console",
+  "product_file": "01-service-access-instructions.pdf",
+  "product_title": "Sentinel Security, SEO & Performance Safe Optimization",
+  "read_only": true,
+  "schema_version": "payhip-launch-qa-finalizer-9.6",
+  "variants": [
+    {
+      "name": "Sentinel Audit Report",
+      "price": "59 EUR"
+    },
+    {
+      "name": "Sentinel Safe Optimization",
+      "price": "149 EUR"
+    },
+    {
+      "name": "Sentinel Monitoring & Improvement",
+      "price": "99 EUR"
+    }
+  ]
+}

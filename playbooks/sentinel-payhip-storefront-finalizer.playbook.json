@@ -1,0 +1,23 @@
+{
+  "applies_changes": false,
+  "blocker_reasons": [],
+  "do_not_upload": [
+    "reports/ (internal Sentinel reports)",
+    "state/ (internal state files)",
+    "audit/ (audit logs)",
+    "playbooks/ (internal playbooks)",
+    "environment files such as dot-env or the local sftp env file",
+    "backups/ and snapshots/",
+    "Cloudflare logs and rule details",
+    "server logs",
+    "private PC reports",
+    "raw Sentinel daily reports",
+    "Git internals (.git, history, hashes)",
+    "any zip not created by the Phase 9.5 export helper"
+  ],
+  "generated_at": "2026-06-18T16:41:59Z",
+  "playbook": "sentinel-payhip-storefront-finalizer",
+  "read_only": true,
+  "schema_version": "payhip-launch-qa-finalizer-9.6",
+  "storefront_qa": "READY"
+}

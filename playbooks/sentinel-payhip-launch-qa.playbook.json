@@ -1,0 +1,17 @@
+{
+  "applies_changes": false,
+  "decision": "READY",
+  "generated_at": "2026-06-18T16:41:59Z",
+  "playbook": "sentinel-payhip-launch-qa",
+  "read_only": true,
+  "schema_version": "payhip-launch-qa-finalizer-9.6",
+  "status": "LAUNCH_QA_READY",
+  "steps": [
+    "Read the Phase 9.5 upload pack (read-only).",
+    "Validate title, product file, short/long descriptions, FAQ, deliverables.",
+    "Validate variants (name, price, description) and after-purchase message.",
+    "Validate manifest, checksums and the optional zip (public files only).",
+    "Run the final public-safety scan and emit READY / NEEDS_REVIEW / BLOCKED."
+  ],
+  "uploads_anything": false
+}
