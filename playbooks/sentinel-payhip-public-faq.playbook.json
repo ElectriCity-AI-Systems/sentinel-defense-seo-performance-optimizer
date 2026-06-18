@@ -1,0 +1,22 @@
+{
+  "applies_changes": false,
+  "faq_count": 12,
+  "generated_at": "2026-06-17T17:35:33Z",
+  "playbook": "sentinel-payhip-public-faq",
+  "questions": [
+    "Is this an automatic repair bot?",
+    "Do you guarantee a 100 percent PageSpeed score?",
+    "Do you guarantee search rankings?",
+    "Do you need my WordPress password?",
+    "Do you change Cloudflare settings?",
+    "Can this be used for live business websites?",
+    "What happens after purchase?",
+    "What should I send?",
+    "What should I never send?",
+    "What is Safe Autonomy?",
+    "What if high-risk changes are needed?",
+    "Can this become ongoing monitoring?"
+  ],
+  "read_only": true,
+  "schema_version": "payhip-public-client-assets-9.4"
+}

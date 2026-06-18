@@ -1,0 +1,21 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-17T17:35:33Z",
+  "pdf_status": "PDF_GENERATED_PURE_PYTHON",
+  "playbook": "sentinel-payhip-product-file",
+  "read_only": true,
+  "schema_version": "payhip-public-client-assets-9.4",
+  "sections": [
+    "1. Thank You",
+    "2. What You Purchased",
+    "3. Available Packages",
+    "4. What Happens Next",
+    "5. What To Send",
+    "6. What Not To Send",
+    "7. Safety-First Workflow",
+    "8. Delivery Overview",
+    "9. Important Disclaimer",
+    "10. Contact"
+  ],
+  "title": "Sentinel Security, SEO & Performance Safe Optimization - Service Access Instructions"
+}

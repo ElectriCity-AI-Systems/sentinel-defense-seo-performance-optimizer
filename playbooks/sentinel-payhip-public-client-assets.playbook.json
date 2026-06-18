@@ -1,0 +1,16 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-06-17T17:35:33Z",
+  "installs_packages": false,
+  "playbook": "sentinel-payhip-public-client-assets",
+  "read_only": true,
+  "schema_version": "payhip-public-client-assets-9.4",
+  "status": "PUBLIC_CLIENT_ASSETS_READY_LOCKED",
+  "steps": [
+    "Build public product file (md/txt/html) from safe constants.",
+    "Build public intake form, safety agreement and service overview.",
+    "Build short/long descriptions and FAQ.",
+    "Generate a pure-Python PDF or PDF source (md/html) if not possible.",
+    "Upload public files to Payhip; copy descriptions into the listing."
+  ]
+}
