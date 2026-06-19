@@ -24,6 +24,7 @@ PROJECT_DIR = Path("/srv/sentinel-defense")
 KERNEL_FILE = PROJECT_DIR / "sentinel_self_governing_safe_autonomy_kernel.py"
 KERNEL_JSON = PROJECT_DIR / "reports/latest/sentinel-self-governing-autonomy-kernel.json"
 KERNEL_LATEST_JSON = PROJECT_DIR / "state/adaptive-learning/latest_self_governing_autonomy_kernel.json"
+PRIORITY_MODEL_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_priority_model.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.md"
@@ -81,6 +82,7 @@ STOP_ON_BREACH = "STOP_ON_BREACH"
 STOP_ON_FORBIDDEN_PATTERN = "STOP_ON_FORBIDDEN_PATTERN"
 STOP_ON_KERNEL_FAILURE = "STOP_ON_KERNEL_FAILURE"
 STOP_ON_REPEATED_TASK_LOOP = "STOP_ON_REPEATED_TASK_LOOP"
+STOP_ON_NO_DIVERSE_SAFE_TASK = "STOP_ON_NO_DIVERSE_SAFE_TASK"
 STOP_ON_NO_SAFE_TASK = "STOP_ON_NO_SAFE_TASK"
 STOP_ON_MAX_CYCLES = "STOP_ON_MAX_CYCLES"
 STOP_ON_LOCK_COLLISION = "STOP_ON_LOCK_COLLISION"
@@ -219,6 +221,48 @@ def load_list(path: Path) -> List[Any]:
 def load_dict(path: Path) -> Dict[str, Any]:
     data, status = read_json(path)
     return data if status == "ok" and isinstance(data, dict) else {}
+
+
+def priority_model() -> Dict[str, Any]:
+    return load_dict(PRIORITY_MODEL_JSON)
+
+
+def priority_allows_repeat(task: Any) -> bool:
+    model = priority_model()
+    anti_loop = model.get("anti_loop") if isinstance(model.get("anti_loop"), dict) else {}
+    selected = model.get("selected_task")
+    return bool(selected == task and anti_loop.get("repeat_allowed") is True)
+
+
+def task_diversity_stats(cycles: List[Dict[str, Any]], model: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    tasks = [str(c.get("selected_task")) for c in cycles if c.get("selected_task")]
+    unique = sorted(set(tasks))
+    repeated_count = max(0, len(tasks) - len(unique))
+    last_three = tasks[-3:]
+    last_five = tasks[-5:]
+    unique_three = len(set(last_three))
+    unique_five = len(set(last_five))
+    model = model if model is not None else priority_model()
+    anti_loop = model.get("anti_loop") if isinstance(model.get("anti_loop"), dict) else {}
+    status = "DIVERSITY_OK"
+    if len(last_three) >= 3 and unique_three < 2:
+        status = STOP_ON_NO_DIVERSE_SAFE_TASK
+    if len(last_five) >= 5 and unique_five < 3:
+        status = STOP_ON_NO_DIVERSE_SAFE_TASK
+    return {
+        "status": status,
+        "tasks": tasks,
+        "unique_tasks": unique,
+        "unique_task_count": len(unique),
+        "repeated_task_count": repeated_count,
+        "last_three_tasks": last_three,
+        "last_five_tasks": last_five,
+        "unique_last_three": unique_three,
+        "unique_last_five": unique_five,
+        "cooldown_respected": anti_loop.get("cooldown_respected", True),
+        "anti_loop_status": anti_loop.get("status", "UNKNOWN"),
+        "next_best_task": model.get("selected_task"),
+    }
 
 
 def command_is_allowlisted(cmd: List[str]) -> bool:
@@ -452,6 +496,8 @@ def cycle_result(cycle_index: int, started_at: str, finished_at: str, proc: Dict
     repair = data.get("repair") if isinstance(data.get("repair"), dict) else {}
     learning = data.get("learning") if isinstance(data.get("learning"), dict) else {}
     owner = data.get("owner_summary") if isinstance(data.get("owner_summary"), dict) else {}
+    priority = data.get("priority_engine_integration") if isinstance(data.get("priority_engine_integration"), dict) else {}
+    decision_priority = decision.get("priority_engine") if isinstance(decision.get("priority_engine"), dict) else {}
     generated = list(classification.get("expected_outputs") or owner.get("what_was_created") or [])
     useful = list(learning.get("useful_outputs") or [])
     blocked = list(classification.get("forbidden_actions") or owner.get("what_stays_forbidden") or [])
@@ -475,6 +521,14 @@ def cycle_result(cycle_index: int, started_at: str, finished_at: str, proc: Dict
         "generated_outputs": generated,
         "useful_outputs": useful,
         "blocked_actions": blocked,
+        "priority_engine": {
+            "used": bool(priority.get("used") or decision_priority.get("used")),
+            "status": priority.get("status") or decision.get("priority_model_status"),
+            "anti_loop_status": priority.get("anti_loop_status") or decision_priority.get("anti_loop_status"),
+            "diversity_status": priority.get("diversity_status") or decision_priority.get("diversity_status"),
+            "cooldown_respected": priority.get("cooldown_respected") if "cooldown_respected" in priority else decision_priority.get("cooldown_respected"),
+            "dynamic_selection_status": decision_priority.get("dynamic_selection_status"),
+        },
         "live_apply": data.get("live_apply", False),
         "allowed_apply_now": data.get("allowed_apply_now", False),
         "high_blocked": data.get("high_blocked", True),
@@ -502,7 +556,7 @@ def evaluate_cycle_stop(result: Dict[str, Any], task_counts: Dict[str, int]) -> 
     task = result.get("selected_task")
     if not task or task == "halt_and_report" or not result.get("next_suggested_task"):
         return STOP_ON_NO_SAFE_TASK
-    if task_counts.get(str(task), 0) >= 4:
+    if task_counts.get(str(task), 0) >= 4 and not priority_allows_repeat(task):
         return STOP_ON_REPEATED_TASK_LOOP
     generated_paths = [PROJECT_DIR / p for p in result.get("generated_outputs", []) if isinstance(p, str)]
     useful_paths = [PROJECT_DIR / p for p in result.get("useful_outputs", []) if isinstance(p, str)]
@@ -567,12 +621,16 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
             task = str(result.get("selected_task") or "")
             task_counts[task] = task_counts.get(task, 0) + 1
             cycle_stop = evaluate_cycle_stop(result, task_counts)
+            result["task_diversity"] = task_diversity_stats(cycles + [result])
+            if not cycle_stop and result["task_diversity"].get("status") == STOP_ON_NO_DIVERSE_SAFE_TASK:
+                cycle_stop = STOP_ON_NO_DIVERSE_SAFE_TASK
             result["stop_reason"] = cycle_stop
             cycles.append(result)
             append_jsonl(AUDIT_JSONL, [{"timestamp_utc": utc_now(), "event": "cycle", "cycle": result}])
             if cycle_stop:
                 stop_reason = cycle_stop
-                if cycle_stop not in {STOP_ON_MAX_CYCLES, STOP_COMPLETED_RUN_ONCE}:
+                if cycle_stop not in {STOP_ON_MAX_CYCLES, STOP_COMPLETED_RUN_ONCE,
+                                      STOP_ON_NO_DIVERSE_SAFE_TASK}:
                     status = STATUS_BLOCKED_SAFETY
                 break
         else:
@@ -590,6 +648,9 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
         "lock_release": lock_release,
         "stop_reason": stop_reason,
         "selected_tasks": [c.get("selected_task") for c in cycles],
+        "task_diversity": task_diversity_stats(cycles),
+        "anti_loop_status": task_diversity_stats(cycles).get("anti_loop_status"),
+        "next_best_task": task_diversity_stats(cycles).get("next_best_task"),
         "validation_status": STATUS_VALIDATION_OK if status == STATUS_RUN_OK else STATUS_VALIDATION_FAILED,
         "breach": status == STATUS_BLOCKED_SAFETY,
     })
@@ -749,6 +810,7 @@ def write_all(report: Dict[str, Any]) -> None:
         "status": report.get("status"),
         "cycles_completed": report.get("cycles_completed", 0),
         "selected_tasks": report.get("selected_tasks", []),
+        "task_diversity": report.get("task_diversity", {}),
         "stop_reason": report.get("stop_reason"),
         "breach": report.get("breach"),
     })
@@ -765,6 +827,7 @@ def stop_patterns_data(report: Dict[str, Any]) -> Dict[str, Any]:
         STOP_ON_FORBIDDEN_PATTERN,
         STOP_ON_KERNEL_FAILURE,
         STOP_ON_REPEATED_TASK_LOOP,
+        STOP_ON_NO_DIVERSE_SAFE_TASK,
         STOP_ON_NO_SAFE_TASK,
         STOP_ON_MAX_CYCLES,
         STOP_ON_LOCK_COLLISION,
@@ -778,6 +841,7 @@ def stop_patterns_data(report: Dict[str, Any]) -> Dict[str, Any]:
         "last_stop_reason": report.get("stop_reason"),
         "last_status": report.get("status"),
         "repeated_task_threshold": 4,
+        "diversity_rule": "at least 2 unique main tasks in 3 cycles when safe alternatives exist",
         "max_cycles": MAX_CYCLES,
     }
 
@@ -791,6 +855,7 @@ def write_playbooks() -> None:
         "high_blocked": True,
         "kernel_allowlist": ALLOWED_KERNEL_COMMANDS,
         "max_cycles": MAX_CYCLES,
+        "priority_model_path": rel(PRIORITY_MODEL_JSON),
     }
     write_json(PLAYBOOK_RUNNER, {
         **common,
@@ -798,6 +863,7 @@ def write_playbooks() -> None:
         "purpose": "Run multiple safe local kernel cycles with validation and learning after each cycle.",
         "allowed_actions": ["kernel_self_test", "kernel_cycle", "kernel_status", "local_reports", "local_state", "local_audit", "local_playbooks"],
         "blocked_actions": ["live_apply", "network", "email", "external_api", "wordpress", "cloudflare", "db", "sftp", "systemd", "cron", "customer_data"],
+        "priority_engine_integration": "read model only; kernel still enforces allowlist and risk classification",
     })
     write_json(PLAYBOOK_STOP, {
         **common,
@@ -815,7 +881,7 @@ def write_playbooks() -> None:
     write_json(PLAYBOOK_OWNER, {
         **common,
         "name": "sentinel-autonomous-cycle-owner-summary",
-        "summary_fields": ["cycles_completed", "selected_tasks", "validated", "repair", "learning", "stop_reason", "next_safe_step", "blocked_capabilities"],
+        "summary_fields": ["cycles_completed", "selected_tasks", "task_diversity", "repeated_task_count", "cooldown_respected", "anti_loop_status", "next_best_task", "validated", "repair", "learning", "stop_reason", "next_safe_step", "blocked_capabilities"],
     })
 
 
@@ -840,6 +906,9 @@ def render_report_md(report: Dict[str, Any]) -> str:
         f"- action: `{report.get('action')}`",
         f"- cycles_completed: `{report.get('cycles_completed', 0)}`",
         f"- stop_reason: `{report.get('stop_reason', '-')}`",
+        f"- task_diversity: `{(report.get('task_diversity') or {}).get('status', '-')}`",
+        f"- unique_task_count: `{(report.get('task_diversity') or {}).get('unique_task_count', '-')}`",
+        f"- anti_loop_status: `{report.get('anti_loop_status', '-')}`",
         f"- live_apply: `{report.get('live_apply')}`",
         f"- emergency_stop: `{report.get('emergency_stop')}`",
         f"- allowed_apply_now: `{report.get('allowed_apply_now')}`",
@@ -877,6 +946,8 @@ def render_log_md(report: Dict[str, Any]) -> str:
             f"- repair: `{cycle.get('repair_status')}`",
             f"- learning: `{cycle.get('learning_status')}`",
             f"- next_suggested_task: `{cycle.get('next_suggested_task')}`",
+            f"- priority_engine: `{(cycle.get('priority_engine') or {}).get('status', '-')}`",
+            f"- diversity: `{(cycle.get('task_diversity') or {}).get('status', '-')}`",
             f"- breach: `{cycle.get('breach')}`",
             "",
         ])
@@ -903,11 +974,18 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
     executed = [f"{c.get('selected_task')} ({c.get('execution_status')})" for c in cycles]
     repaired = [f"{c.get('selected_task')} ({c.get('repair_status')})" for c in cycles]
     learned = [str(c.get("next_suggested_task")) for c in cycles if c.get("next_suggested_task")]
+    diversity = report.get("task_diversity") or {}
     lines = [
         "# Autonomous Cycle Owner Summary",
         "",
         f"- cycles_liefen: `{len(cycles)}`",
         f"- selected_tasks: `{', '.join(selected_tasks) or '-'}`",
+        f"- task_diversity: `{diversity.get('status', '-')}`",
+        f"- unique_task_count: `{diversity.get('unique_task_count', '-')}`",
+        f"- repeated_task_count: `{diversity.get('repeated_task_count', '-')}`",
+        f"- cooldown_respected: `{diversity.get('cooldown_respected', '-')}`",
+        f"- anti_loop_status: `{diversity.get('anti_loop_status', '-')}`",
+        f"- next_best_task: `{diversity.get('next_best_task', '-')}`",
         f"- ausgeführt: `{', '.join(executed) or '-'}`",
         f"- validiert: `{', '.join(str(c.get('validation_status')) for c in cycles) or '-'}`",
         f"- repariert: `{', '.join(repaired) or '-'}`",
@@ -934,6 +1012,8 @@ def next_safe_step(report: Dict[str, Any]) -> str:
         return "Stop and review safety finding before any further cycle."
     if report.get("stop_reason") == STOP_ON_MAX_CYCLES:
         return "Review owner summary; next run may repeat controlled local cycles if still needed."
+    if report.get("stop_reason") == STOP_ON_NO_DIVERSE_SAFE_TASK:
+        return "Review priority model; no additional diverse safe task was available in this run."
     return str(last.get("next_suggested_task") or "Review owner summary.")
 
 
@@ -952,6 +1032,10 @@ def print_summary(report: Dict[str, Any]) -> None:
     print(f"action={report.get('action')}")
     print(f"cycles_completed={report.get('cycles_completed', 0)}")
     print(f"selected_tasks={','.join(str(x) for x in report.get('selected_tasks', [])) or '-'}")
+    diversity = report.get("task_diversity") or {}
+    print(f"task_diversity={diversity.get('status', '-')}")
+    print(f"unique_task_count={diversity.get('unique_task_count', '-')}")
+    print(f"anti_loop_status={report.get('anti_loop_status', '-')}")
     print(f"stop_reason={report.get('stop_reason', '-')}")
     print(f"validation_status={report.get('validation_status', (report.get('validation') or {}).get('status', '-'))}")
     print(f"lockfile_exists={LOCKFILE.exists()}")
@@ -993,6 +1077,15 @@ def action_self_test() -> Dict[str, Any]:
         failures.append("max_cycles_too_high")
     if HARD_DEFAULTS["emergency_stop"] is not True or HARD_DEFAULTS["live_apply"] is not False:
         failures.append("hard_defaults_invalid")
+    if STOP_ON_NO_DIVERSE_SAFE_TASK not in stop_patterns_data({})["known_stop_reasons"]:
+        failures.append("no_diverse_stop_reason_missing")
+    fake_cycles = [
+        {"selected_task": "generate_next_safe_actions"},
+        {"selected_task": "check_public_asset_safety"},
+        {"selected_task": "check_missing_inputs"},
+    ]
+    if task_diversity_stats(fake_cycles)["unique_task_count"] < 2:
+        failures.append("diversity_stats_failed")
     for path in [REPORT_JSON, STATE_JSON, AUDIT_JSONL, PLAYBOOK_RUNNER]:
         try:
             assert_allowed_write(path)

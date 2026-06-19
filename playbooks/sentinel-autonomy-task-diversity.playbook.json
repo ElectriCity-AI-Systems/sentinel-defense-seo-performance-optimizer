@@ -1,0 +1,44 @@
+{
+  "allowed_apply_now": false,
+  "allowed_tasks": [
+    "observe_project_state",
+    "update_owner_summary",
+    "update_service_proof",
+    "rebuild_payhip_upload_pack",
+    "rerun_payhip_launch_qa",
+    "update_fulfillment_board",
+    "run_first_order_dryrun",
+    "check_public_asset_safety",
+    "check_missing_inputs",
+    "generate_next_safe_actions",
+    "repair_missing_public_asset",
+    "repair_invalid_json_output",
+    "rebuild_manifest_and_checksums",
+    "update_learning_state",
+    "write_audit_event",
+    "generate_git_checkpoint_suggestion"
+  ],
+  "auto_allowed_risk": [
+    "DRAFT",
+    "LOW_EXPORT",
+    "LOW_LOCAL",
+    "LOW_STATE",
+    "READ_ONLY"
+  ],
+  "blocked_risk": [
+    "HIGH",
+    "LOW_LIVE",
+    "MEDIUM"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "name": "sentinel-autonomy-task-diversity",
+  "phase": "10.2",
+  "rules": [
+    "at least two distinct main tasks in three cycles when safe tasks exist",
+    "at least three distinct main tasks in five cycles when safe tasks exist",
+    "otherwise stop with STOP_ON_NO_DIVERSE_SAFE_TASK"
+  ],
+  "schema_version": "sentinel-autonomous-priority-engine-10.2"
+}

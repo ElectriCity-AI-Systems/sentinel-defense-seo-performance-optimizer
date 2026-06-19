@@ -1,0 +1,62 @@
+{
+  "allowed_apply_now": false,
+  "allowed_tasks": [
+    "observe_project_state",
+    "update_owner_summary",
+    "update_service_proof",
+    "rebuild_payhip_upload_pack",
+    "rerun_payhip_launch_qa",
+    "update_fulfillment_board",
+    "run_first_order_dryrun",
+    "check_public_asset_safety",
+    "check_missing_inputs",
+    "generate_next_safe_actions",
+    "repair_missing_public_asset",
+    "repair_invalid_json_output",
+    "rebuild_manifest_and_checksums",
+    "update_learning_state",
+    "write_audit_event",
+    "generate_git_checkpoint_suggestion"
+  ],
+  "auto_allowed_risk": [
+    "DRAFT",
+    "LOW_EXPORT",
+    "LOW_LOCAL",
+    "LOW_STATE",
+    "READ_ONLY"
+  ],
+  "blocked_risk": [
+    "HIGH",
+    "LOW_LIVE",
+    "MEDIUM"
+  ],
+  "companion_only_tasks": [
+    "update_learning_state",
+    "write_audit_event"
+  ],
+  "cooldowns": {
+    "generate_next_safe_actions": 2,
+    "rebuild_payhip_upload_pack": 3,
+    "rerun_payhip_launch_qa": 3,
+    "run_first_order_dryrun": 5,
+    "update_fulfillment_board": 3,
+    "update_owner_summary": 2
+  },
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "max_in_window": {
+    "check_missing_inputs": [
+      2,
+      5
+    ],
+    "check_public_asset_safety": [
+      2,
+      5
+    ]
+  },
+  "name": "sentinel-autonomy-anti-loop-governor",
+  "phase": "10.2",
+  "schema_version": "sentinel-autonomous-priority-engine-10.2",
+  "stop_reason": "STOP_ON_NO_DIVERSE_SAFE_TASK"
+}
