@@ -1,0 +1,36 @@
+{
+  "allowed_apply_now": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "kernel_allowlist": {
+    "cycle": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--cycle"
+    ],
+    "self-test": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--self-test"
+    ],
+    "status": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--status"
+    ]
+  },
+  "live_apply": false,
+  "max_cycles": 5,
+  "name": "sentinel-autonomous-cycle-owner-summary",
+  "phase": "10.1",
+  "summary_fields": [
+    "cycles_completed",
+    "selected_tasks",
+    "validated",
+    "repair",
+    "learning",
+    "stop_reason",
+    "next_safe_step",
+    "blocked_capabilities"
+  ]
+}

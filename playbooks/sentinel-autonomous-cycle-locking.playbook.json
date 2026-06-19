@@ -1,0 +1,30 @@
+{
+  "active_process_check": "proc_pid_exists",
+  "allowed_apply_now": false,
+  "dangerous_process_actions": "never",
+  "emergency_stop": true,
+  "high_blocked": true,
+  "kernel_allowlist": {
+    "cycle": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--cycle"
+    ],
+    "self-test": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--self-test"
+    ],
+    "status": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--status"
+    ]
+  },
+  "live_apply": false,
+  "lockfile": "state/adaptive-learning/autonomous_cycle_runner.lock",
+  "max_cycles": 5,
+  "name": "sentinel-autonomous-cycle-locking",
+  "phase": "10.1",
+  "stale_after_hours": 6
+}

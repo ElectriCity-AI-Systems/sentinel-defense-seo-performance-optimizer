@@ -1,0 +1,49 @@
+{
+  "allowed_actions": [
+    "kernel_self_test",
+    "kernel_cycle",
+    "kernel_status",
+    "local_reports",
+    "local_state",
+    "local_audit",
+    "local_playbooks"
+  ],
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "email",
+    "external_api",
+    "wordpress",
+    "cloudflare",
+    "db",
+    "sftp",
+    "systemd",
+    "cron",
+    "customer_data"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "kernel_allowlist": {
+    "cycle": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--cycle"
+    ],
+    "self-test": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--self-test"
+    ],
+    "status": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--status"
+    ]
+  },
+  "live_apply": false,
+  "max_cycles": 5,
+  "name": "sentinel-autonomous-cycle-runner",
+  "phase": "10.1",
+  "purpose": "Run multiple safe local kernel cycles with validation and learning after each cycle."
+}

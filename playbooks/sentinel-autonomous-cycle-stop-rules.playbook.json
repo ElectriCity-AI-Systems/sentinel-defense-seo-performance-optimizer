@@ -1,0 +1,38 @@
+{
+  "allowed_apply_now": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "kernel_allowlist": {
+    "cycle": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--cycle"
+    ],
+    "self-test": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--self-test"
+    ],
+    "status": [
+      "python3",
+      "sentinel_self_governing_safe_autonomy_kernel.py",
+      "--status"
+    ]
+  },
+  "live_apply": false,
+  "max_cycles": 5,
+  "name": "sentinel-autonomous-cycle-stop-rules",
+  "phase": "10.1",
+  "stop_reasons": [
+    "STOP_ON_BREACH",
+    "STOP_ON_FORBIDDEN_PATTERN",
+    "STOP_ON_KERNEL_FAILURE",
+    "STOP_ON_REPEATED_TASK_LOOP",
+    "STOP_ON_NO_SAFE_TASK",
+    "STOP_ON_MAX_CYCLES",
+    "STOP_ON_LOCK_COLLISION",
+    "STOP_ON_INVALID_JSON",
+    "STOP_ON_UNSAFE_SCOPE",
+    "STOP_ON_LIVE_APPLY_ATTEMPT"
+  ]
+}
