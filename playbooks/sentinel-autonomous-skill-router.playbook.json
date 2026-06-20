@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "capability_count": 11,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-skill-router",
+  "phase": "10.3",
+  "purpose": "Route the next safe local capability using usefulness, freshness and guard status.",
+  "routing_inputs": [
+    "priority_model",
+    "capability_freshness",
+    "success_patterns",
+    "blocked_patterns"
+  ],
+  "schema_version": "sentinel-autonomous-capability-registry-10.3",
+  "selected_capability": "payhip_upload_pack_export"
+}

@@ -222,6 +222,7 @@ STATE_JSON = STATE_DIR / "sentinel_self_governing_autonomy_kernel.json"
 STATE_LATEST_JSON = STATE_DIR / "latest_self_governing_autonomy_kernel.json"
 TASK_MEMORY_JSON = STATE_DIR / "autonomy_task_memory.json"
 PRIORITY_MODEL_JSON = STATE_DIR / "autonomy_task_priority_model.json"
+CAPABILITY_REGISTRY_JSON = STATE_DIR / "autonomous_capability_registry.json"
 SUCCESS_PATTERNS_JSON = STATE_DIR / "autonomy_success_patterns.json"
 BLOCKED_PATTERNS_JSON = STATE_DIR / "autonomy_blocked_patterns.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomy_repair_patterns.json"
@@ -706,6 +707,8 @@ def priority_model_decision(observation: Dict[str, Any],
             "used": True,
             "model_status": model.get("status"),
             "selected_task_score": candidate.get("score", model.get("selected_task_score")),
+            "selected_capability": candidate.get("capability_id") or model.get("selected_capability"),
+            "capability_status": candidate.get("capability_status") or model.get("selected_capability_status"),
             "anti_loop_status": (model.get("anti_loop") or {}).get("status"),
             "diversity_status": (model.get("diversity") or {}).get("status"),
             "cooldown_respected": (model.get("anti_loop") or {}).get("cooldown_respected"),
@@ -784,6 +787,54 @@ def choose_priority_candidate(model: Dict[str, Any]) -> Tuple[Optional[str], Dic
     if blocked_by_rotation:
         return None, {}, "no_diverse_priority_candidate"
     return None, {}, "no_priority_candidate"
+
+
+def capability_context_for(task: str, decision: Dict[str, Any]) -> Dict[str, Any]:
+    registry, status = read_optional_json(CAPABILITY_REGISTRY_JSON)
+    selected_capability = (decision.get("priority_engine") or {}).get("selected_capability")
+    if not selected_capability:
+        model, model_status = read_optional_json(PRIORITY_MODEL_JSON)
+        if model_status == "ok" and isinstance(model, dict):
+            selected_capability = model.get("selected_capability")
+    if status != "ok" or not isinstance(registry, dict):
+        return {
+            "registry_status": status,
+            "selected_capability": selected_capability,
+            "capability_health": "registry_unavailable",
+            "capability_reason": "capability registry missing or unavailable; task safety falls back to kernel classification",
+            "capability_risk": TASK_RISK_CLASS.get(task, HIGH),
+            "capability_freshness": None,
+        }
+    capabilities = registry.get("capabilities") if isinstance(registry.get("capabilities"), list) else []
+    selected = None
+    for cap in capabilities:
+        if not isinstance(cap, dict):
+            continue
+        if selected_capability and cap.get("capability_id") == selected_capability:
+            selected = cap
+            break
+        if task in (cap.get("task_ids") or []) and selected is None:
+            selected = cap
+    if not selected:
+        return {
+            "registry_status": "ok",
+            "selected_capability": selected_capability,
+            "capability_health": "capability_not_mapped",
+            "capability_reason": "no registered capability mapped to selected task",
+            "capability_risk": TASK_RISK_CLASS.get(task, HIGH),
+            "capability_freshness": None,
+        }
+    return {
+        "registry_status": "ok",
+        "selected_capability": selected.get("capability_id"),
+        "capability_health": selected.get("health_status"),
+        "capability_reason": selected.get("reason_if_blocked") or "capability available under local safe guards",
+        "capability_risk": selected.get("risk_class"),
+        "capability_freshness": selected.get("freshness_score"),
+        "capability_usefulness": selected.get("usefulness_score"),
+        "capability_priority": selected.get("priority_score"),
+        "capability_can_run_autonomously": selected.get("can_run_autonomously"),
+    }
 
 
 def decide(observation: Dict[str, Any], breach: bool) -> Dict[str, Any]:
@@ -1102,6 +1153,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
     decision = decide(observation, breach)
     task = decision["selected_task"]
     classification = classify(task, observation, breach)
+    capability_context = capability_context_for(task, decision)
     execution = execute(classification, execute_flag)
     validation = validate(classification, execution, safety, breach)
     repair_res = repair(classification, execution, validation, observation, breach, execute_flag)
@@ -1119,6 +1171,11 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
                               f"({execution['status']})."),
         "why_this_task": decision["reason"],
         "priority_engine_status": decision.get("priority_model_status", "not_checked"),
+        "selected_capability": capability_context.get("selected_capability"),
+        "capability_health": capability_context.get("capability_health"),
+        "capability_reason": capability_context.get("capability_reason"),
+        "capability_risk": capability_context.get("capability_risk"),
+        "capability_freshness": capability_context.get("capability_freshness"),
         "what_was_created": classification.get("expected_outputs", []),
         "what_was_validated": validation["status"],
         "what_was_blocked": (classification.get("reason_if_blocked")
@@ -1150,6 +1207,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
             "diversity_status": (decision.get("priority_engine") or {}).get("diversity_status"),
             "cooldown_respected": (decision.get("priority_engine") or {}).get("cooldown_respected"),
         },
+        "capability_registry_integration": capability_context,
         "classification": classification,
         "execution": execution,
         "validation": validation,
@@ -1308,6 +1366,10 @@ def render_owner_summary_md(s: Dict[str, Any]) -> str:
              f"- What Sentinel did: {redact_text(s['what_sentinel_did'])}",
              f"- Why this task: {redact_text(s['why_this_task'])}",
              f"- Priority engine: {redact_text(s.get('priority_engine_status'))}",
+             f"- Selected capability: {redact_text(s.get('selected_capability'))}",
+             f"- Capability health: {redact_text(s.get('capability_health'))}",
+             f"- Capability risk: {redact_text(s.get('capability_risk'))}",
+             f"- Capability freshness: {redact_text(s.get('capability_freshness'))}",
              f"- What was validated: {s['what_was_validated']}",
              f"- What was blocked: {redact_text(s['what_was_blocked'])}",
              f"- What was learned -> next: {redact_text(s['what_was_learned'])}",
@@ -1359,6 +1421,8 @@ def render_kernel_md(report: Dict[str, Any]) -> str:
         f"- generated: {report['generated_at']}",
         f"- selected task: {report['decision']['selected_task']}",
         f"- priority engine: {report.get('priority_engine_integration', {}).get('status', '-')}",
+        f"- selected capability: {report.get('capability_registry_integration', {}).get('selected_capability', '-')}",
+        f"- capability health: {report.get('capability_registry_integration', {}).get('capability_health', '-')}",
         f"- execution: {report['execution']['status']}",
         f"- validation: {report['validation']['status']}",
         f"- repair: {report['repair']['status']}",

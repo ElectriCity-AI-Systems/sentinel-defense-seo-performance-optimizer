@@ -265,6 +265,22 @@ def task_diversity_stats(cycles: List[Dict[str, Any]], model: Optional[Dict[str,
     }
 
 
+def capability_diversity_stats(cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
+    capabilities = [
+        str(c.get("selected_capability"))
+        for c in cycles
+        if c.get("selected_capability")
+    ]
+    unique = sorted(set(capabilities))
+    return {
+        "capabilities": capabilities,
+        "unique_capabilities": unique,
+        "unique_capability_count": len(unique),
+        "capability_repeated_count": max(0, len(capabilities) - len(unique)),
+        "status": "CAPABILITY_DIVERSITY_OK" if len(capabilities) < 3 or len(unique) >= 2 else "CAPABILITY_DIVERSITY_NEEDS_ROTATION",
+    }
+
+
 def command_is_allowlisted(cmd: List[str]) -> bool:
     return cmd in ALLOWED_KERNEL_COMMANDS.values()
 
@@ -497,6 +513,7 @@ def cycle_result(cycle_index: int, started_at: str, finished_at: str, proc: Dict
     learning = data.get("learning") if isinstance(data.get("learning"), dict) else {}
     owner = data.get("owner_summary") if isinstance(data.get("owner_summary"), dict) else {}
     priority = data.get("priority_engine_integration") if isinstance(data.get("priority_engine_integration"), dict) else {}
+    capability = data.get("capability_registry_integration") if isinstance(data.get("capability_registry_integration"), dict) else {}
     decision_priority = decision.get("priority_engine") if isinstance(decision.get("priority_engine"), dict) else {}
     generated = list(classification.get("expected_outputs") or owner.get("what_was_created") or [])
     useful = list(learning.get("useful_outputs") or [])
@@ -516,6 +533,11 @@ def cycle_result(cycle_index: int, started_at: str, finished_at: str, proc: Dict
         "repair_repaired": repair.get("repaired"),
         "learning_status": "learned" if learning else "missing",
         "next_suggested_task": data.get("next_suggested_task") or learning.get("next_suggested_task"),
+        "selected_capability": capability.get("selected_capability"),
+        "capability_status": capability.get("capability_health"),
+        "capability_risk": capability.get("capability_risk"),
+        "capability_freshness": capability.get("capability_freshness"),
+        "capability_cooldown_respected": priority.get("cooldown_respected") if "cooldown_respected" in priority else decision_priority.get("cooldown_respected"),
         "breach": bool(data.get("breach")),
         "stop_reason": None,
         "generated_outputs": generated,
@@ -649,6 +671,8 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
         "stop_reason": stop_reason,
         "selected_tasks": [c.get("selected_task") for c in cycles],
         "task_diversity": task_diversity_stats(cycles),
+        "selected_capabilities": [c.get("selected_capability") for c in cycles if c.get("selected_capability")],
+        "capability_diversity": capability_diversity_stats(cycles),
         "anti_loop_status": task_diversity_stats(cycles).get("anti_loop_status"),
         "next_best_task": task_diversity_stats(cycles).get("next_best_task"),
         "validation_status": STATUS_VALIDATION_OK if status == STATUS_RUN_OK else STATUS_VALIDATION_FAILED,
@@ -810,7 +834,9 @@ def write_all(report: Dict[str, Any]) -> None:
         "status": report.get("status"),
         "cycles_completed": report.get("cycles_completed", 0),
         "selected_tasks": report.get("selected_tasks", []),
+        "selected_capabilities": report.get("selected_capabilities", []),
         "task_diversity": report.get("task_diversity", {}),
+        "capability_diversity": report.get("capability_diversity", {}),
         "stop_reason": report.get("stop_reason"),
         "breach": report.get("breach"),
     })
@@ -881,7 +907,7 @@ def write_playbooks() -> None:
     write_json(PLAYBOOK_OWNER, {
         **common,
         "name": "sentinel-autonomous-cycle-owner-summary",
-        "summary_fields": ["cycles_completed", "selected_tasks", "task_diversity", "repeated_task_count", "cooldown_respected", "anti_loop_status", "next_best_task", "validated", "repair", "learning", "stop_reason", "next_safe_step", "blocked_capabilities"],
+        "summary_fields": ["cycles_completed", "selected_tasks", "selected_capabilities", "task_diversity", "capability_diversity", "repeated_task_count", "cooldown_respected", "anti_loop_status", "next_best_task", "validated", "repair", "learning", "stop_reason", "next_safe_step", "blocked_capabilities"],
     })
 
 
@@ -907,6 +933,7 @@ def render_report_md(report: Dict[str, Any]) -> str:
         f"- cycles_completed: `{report.get('cycles_completed', 0)}`",
         f"- stop_reason: `{report.get('stop_reason', '-')}`",
         f"- task_diversity: `{(report.get('task_diversity') or {}).get('status', '-')}`",
+        f"- capability_diversity: `{(report.get('capability_diversity') or {}).get('status', '-')}`",
         f"- unique_task_count: `{(report.get('task_diversity') or {}).get('unique_task_count', '-')}`",
         f"- anti_loop_status: `{report.get('anti_loop_status', '-')}`",
         f"- live_apply: `{report.get('live_apply')}`",
@@ -947,6 +974,8 @@ def render_log_md(report: Dict[str, Any]) -> str:
             f"- learning: `{cycle.get('learning_status')}`",
             f"- next_suggested_task: `{cycle.get('next_suggested_task')}`",
             f"- priority_engine: `{(cycle.get('priority_engine') or {}).get('status', '-')}`",
+            f"- selected_capability: `{cycle.get('selected_capability', '-')}`",
+            f"- capability_status: `{cycle.get('capability_status', '-')}`",
             f"- diversity: `{(cycle.get('task_diversity') or {}).get('status', '-')}`",
             f"- breach: `{cycle.get('breach')}`",
             "",
@@ -971,16 +1000,21 @@ def render_validation_md(validation: Dict[str, Any]) -> str:
 def render_owner_summary_md(report: Dict[str, Any]) -> str:
     cycles = report.get("cycle_results") or []
     selected_tasks = [str(c.get("selected_task")) for c in cycles]
+    selected_capabilities = [str(c.get("selected_capability")) for c in cycles if c.get("selected_capability")]
     executed = [f"{c.get('selected_task')} ({c.get('execution_status')})" for c in cycles]
     repaired = [f"{c.get('selected_task')} ({c.get('repair_status')})" for c in cycles]
     learned = [str(c.get("next_suggested_task")) for c in cycles if c.get("next_suggested_task")]
     diversity = report.get("task_diversity") or {}
+    capability_diversity = report.get("capability_diversity") or {}
     lines = [
         "# Autonomous Cycle Owner Summary",
         "",
         f"- cycles_liefen: `{len(cycles)}`",
         f"- selected_tasks: `{', '.join(selected_tasks) or '-'}`",
+        f"- selected_capabilities: `{', '.join(selected_capabilities) or '-'}`",
         f"- task_diversity: `{diversity.get('status', '-')}`",
+        f"- capability_diversity: `{capability_diversity.get('status', '-')}`",
+        f"- unique_capability_count: `{capability_diversity.get('unique_capability_count', '-')}`",
         f"- unique_task_count: `{diversity.get('unique_task_count', '-')}`",
         f"- repeated_task_count: `{diversity.get('repeated_task_count', '-')}`",
         f"- cooldown_respected: `{diversity.get('cooldown_respected', '-')}`",
@@ -1032,8 +1066,11 @@ def print_summary(report: Dict[str, Any]) -> None:
     print(f"action={report.get('action')}")
     print(f"cycles_completed={report.get('cycles_completed', 0)}")
     print(f"selected_tasks={','.join(str(x) for x in report.get('selected_tasks', [])) or '-'}")
+    print(f"selected_capabilities={','.join(str(x) for x in report.get('selected_capabilities', [])) or '-'}")
     diversity = report.get("task_diversity") or {}
+    cap_diversity = report.get("capability_diversity") or {}
     print(f"task_diversity={diversity.get('status', '-')}")
+    print(f"capability_diversity={cap_diversity.get('status', '-')}")
     print(f"unique_task_count={diversity.get('unique_task_count', '-')}")
     print(f"anti_loop_status={report.get('anti_loop_status', '-')}")
     print(f"stop_reason={report.get('stop_reason', '-')}")
@@ -1086,6 +1123,13 @@ def action_self_test() -> Dict[str, Any]:
     ]
     if task_diversity_stats(fake_cycles)["unique_task_count"] < 2:
         failures.append("diversity_stats_failed")
+    fake_cap_cycles = [
+        {"selected_capability": "autonomy_kernel"},
+        {"selected_capability": "public_client_assets"},
+        {"selected_capability": "autonomy_kernel"},
+    ]
+    if capability_diversity_stats(fake_cap_cycles)["unique_capability_count"] < 2:
+        failures.append("capability_diversity_stats_failed")
     for path in [REPORT_JSON, STATE_JSON, AUDIT_JSONL, PLAYBOOK_RUNNER]:
         try:
             assert_allowed_write(path)

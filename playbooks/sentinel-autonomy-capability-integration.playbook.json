@@ -1,0 +1,16 @@
+{
+  "allowed_apply_now": false,
+  "capability_count": 11,
+  "emergency_stop": true,
+  "fallback": "missing registry never blocks safe defaults",
+  "high_blocked": true,
+  "kernel_displays_capability_context": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomy-capability-integration",
+  "phase": "10.3",
+  "priority_engine_reads": "state/adaptive-learning/autonomous_capability_registry.json",
+  "runner_records_capability_context": true,
+  "schema_version": "sentinel-autonomous-capability-registry-10.3"
+}

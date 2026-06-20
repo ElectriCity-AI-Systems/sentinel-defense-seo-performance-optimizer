@@ -151,6 +151,25 @@ TASK_OUTPUTS: Dict[str, List[str]] = {
     "generate_git_checkpoint_suggestion": ["reports/latest/sentinel-autonomy-git-checkpoint-suggestion.md"],
 }
 
+TASK_TO_CAPABILITY = {
+    "observe_project_state": "autonomy_kernel",
+    "update_owner_summary": "owner_dashboard_service_packaging",
+    "update_service_proof": "service_proof_trend",
+    "rebuild_payhip_upload_pack": "payhip_upload_pack_export",
+    "rerun_payhip_launch_qa": "payhip_launch_qa",
+    "update_fulfillment_board": "payhip_fulfillment_board",
+    "run_first_order_dryrun": "first_order_dryrun",
+    "check_public_asset_safety": "public_client_assets",
+    "check_missing_inputs": "autonomy_kernel",
+    "generate_next_safe_actions": "priority_engine",
+    "repair_missing_public_asset": "public_client_assets",
+    "repair_invalid_json_output": "autonomy_kernel",
+    "rebuild_manifest_and_checksums": "payhip_upload_pack_export",
+    "update_learning_state": "autonomy_kernel",
+    "write_audit_event": "autonomy_kernel",
+    "generate_git_checkpoint_suggestion": "priority_engine",
+}
+
 KERNEL_JSON = PROJECT_DIR / "reports/latest/sentinel-self-governing-autonomy-kernel.json"
 RUNNER_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.json"
 TASK_DECISION_MD = PROJECT_DIR / "reports/latest/sentinel-autonomy-task-decision.md"
@@ -164,6 +183,7 @@ REPAIR_PATTERNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_repair_pa
 LATEST_KERNEL_JSON = PROJECT_DIR / "state/adaptive-learning/latest_self_governing_autonomy_kernel.json"
 LATEST_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_cycle_runner.json"
 EXPORT_LATEST_DIR = PROJECT_DIR / "exports/payhip-upload-pack/latest"
+CAPABILITY_REGISTRY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_registry.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.md"
@@ -436,6 +456,7 @@ def read_inputs() -> Dict[str, Any]:
         REPAIR_PATTERNS_JSON,
         LATEST_KERNEL_JSON,
         LATEST_RUNNER_JSON,
+        CAPABILITY_REGISTRY_JSON,
     ]
     statuses: Dict[str, str] = {}
     missing: List[str] = []
@@ -449,6 +470,7 @@ def read_inputs() -> Dict[str, Any]:
             missing.append(rel(path))
     kernel = load_dict(KERNEL_JSON) or load_dict(LATEST_KERNEL_JSON)
     runner = load_dict(RUNNER_JSON) or load_dict(LATEST_RUNNER_JSON)
+    capability_registry = load_dict(CAPABILITY_REGISTRY_JSON)
     git_status = exact_git_command("status")
     git_log = exact_git_command("log")
     return {
@@ -457,12 +479,27 @@ def read_inputs() -> Dict[str, Any]:
         "missing_inputs": missing,
         "kernel": kernel,
         "runner": runner,
+        "capability_registry": capability_registry,
         "recent_tasks": collect_recent_tasks(),
         "critical_json": critical_json_scan(),
         "public_assets": public_assets_status(),
         "manifest": manifest_status(),
         "git_status": git_status,
         "git_log": git_log,
+    }
+
+
+def capability_index(inputs: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    registry = inputs.get("capability_registry")
+    if not isinstance(registry, dict):
+        return {}
+    caps = registry.get("capabilities")
+    if not isinstance(caps, list):
+        return {}
+    return {
+        str(cap.get("capability_id")): cap
+        for cap in caps
+        if isinstance(cap, dict) and cap.get("capability_id")
     }
 
 
@@ -539,6 +576,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
     manifest = inputs["manifest"]
     kernel = inputs["kernel"]
     runner = inputs["runner"]
+    capabilities = capability_index(inputs)
     breach = bool(kernel.get("breach") or runner.get("breach"))
     forbidden_stop = breach
     scores: List[Dict[str, Any]] = []
@@ -546,6 +584,15 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
 
     for task in ALLOWED_TASKS:
         risk = TASK_RISK.get(task, HIGH)
+        cap_id = TASK_TO_CAPABILITY.get(task)
+        cap = capabilities.get(cap_id or "", {})
+        capability_usefulness = 0
+        capability_freshness_gap = 0
+        capability_blocked = False
+        if cap:
+            capability_usefulness = min(18, max(-20, int(cap.get("usefulness_score") or 0) // 4))
+            capability_freshness_gap = max(0, 100 - int(cap.get("freshness_score") or 100)) // 8
+            capability_blocked = cap.get("can_run_autonomously") is False
         urgency = 0
         repair_value = 0
         validation_failure = 0
@@ -623,6 +670,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         if task in COMPANION_ONLY_TASKS:
             blocked_penalty += 120
             reason_parts.append("companion_only_not_main_task")
+        if cap and capability_blocked:
+            blocked_penalty += 85
+            reason_parts.append(f"capability_blocked:{cap_id}")
         if task == "repair_invalid_json_output" and not broken_json:
             blocked_penalty += 90
             reason_parts.append("no_broken_json_to_repair")
@@ -651,6 +701,8 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             "validation_failure_score": validation_failure,
             "business_value_score": BUSINESS_VALUE.get(task, 0),
             "learning_value_score": LEARNING_VALUE.get(task, 5),
+            "capability_usefulness_score": capability_usefulness,
+            "capability_freshness_score": capability_freshness_gap,
             "repair_value_score": repair_value,
             "freshness_penalty": freshness_penalty_for(task, outputs),
             "repetition_penalty": repetition,
@@ -664,6 +716,8 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             + components["validation_failure_score"]
             + components["business_value_score"]
             + components["learning_value_score"]
+            + components["capability_usefulness_score"]
+            + components["capability_freshness_score"]
             + components["repair_value_score"]
             - components["freshness_penalty"]
             - components["repetition_penalty"]
@@ -685,6 +739,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             "score": int(total),
             "can_execute_now": can_execute_now,
             "cooldown_remaining": cooldown,
+            "capability_id": cap_id,
+            "capability_status": cap.get("health_status") if cap else "registry_missing_or_unmapped",
+            "capability_can_run_autonomously": cap.get("can_run_autonomously") if cap else None,
             "reason": ", ".join(reason_parts) if reason_parts else "normal_rotation",
             "components": components,
             "outputs": outputs.get(task, {}),
@@ -719,11 +776,15 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
 
 
 def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    registry = inputs.get("capability_registry")
+    registry_status = "ok" if isinstance(registry, dict) and registry.get("capabilities") else "missing_or_invalid"
     return {
         "missing_inputs": inputs.get("missing_inputs", []),
         "critical_json": inputs.get("critical_json", {}),
         "public_assets": inputs.get("public_assets", {}),
         "manifest": inputs.get("manifest", {}),
+        "capability_registry_status": registry_status,
+        "capability_count": len(registry.get("capabilities", [])) if isinstance(registry, dict) else 0,
         "git_status_count": len((inputs.get("git_status") or {}).get("lines") or []),
         "git_log_count": len((inputs.get("git_log") or {}).get("lines") or []),
     }
@@ -805,6 +866,8 @@ def select_next() -> Dict[str, Any]:
 def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY_MODEL_READY") -> Dict[str, Any]:
     selected = scoring.get("selected") or {}
     selected_task = selected.get("task")
+    selected_capability = selected.get("capability_id")
+    selected_capability_status = selected.get("capability_status")
     model = {
         "schema_version": SCHEMA_VERSION,
         "phase": PHASE,
@@ -816,6 +879,9 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "selected_task_score": selected.get("score"),
         "selected_task_risk_class": selected.get("risk_class"),
         "selected_task_executable": bool(selected.get("can_execute_now")),
+        "selected_capability": selected_capability,
+        "selected_capability_status": selected_capability_status,
+        "selected_capability_can_run_autonomously": selected.get("capability_can_run_autonomously"),
         "can_execute_now": bool(selected.get("can_execute_now")),
         "task_scores": scoring["scores"],
         "top_scores": scoring["top_scores"],
@@ -828,6 +894,12 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "allow_repeated_task_loop_if_reason": False,
             "stop_reason_when_no_diverse_task": "STOP_ON_NO_DIVERSE_SAFE_TASK",
             "companion_tasks_not_main": sorted(COMPANION_ONLY_TASKS),
+        },
+        "capability_registry_integration": {
+            "registry_path": "state/adaptive-learning/autonomous_capability_registry.json",
+            "registry_status": (scoring.get("inputs") or {}).get("capability_registry_status"),
+            "selected_capability": selected_capability,
+            "selected_capability_status": selected_capability_status,
         },
         "hard_defaults": HARD_DEFAULTS,
         "live_apply": False,
@@ -966,6 +1038,7 @@ def render_engine_md(model: Dict[str, Any]) -> str:
         "",
         f"- status: `{model.get('status')}`",
         f"- selected_task: `{model.get('selected_task')}`",
+        f"- selected_capability: `{model.get('selected_capability')}`",
         f"- selected_task_score: `{model.get('selected_task_score')}`",
         f"- risk_class: `{model.get('selected_task_risk_class')}`",
         f"- can_execute_now: `{model.get('can_execute_now')}`",
@@ -985,6 +1058,7 @@ def render_scores_md(model: Dict[str, Any]) -> str:
         lines.append(
             f"{index}. `{item.get('task')}` score=`{item.get('score')}` "
             f"risk=`{item.get('risk_class')}` executable=`{item.get('can_execute_now')}` "
+            f"capability=`{item.get('capability_id')}` "
             f"reason={redact_text(item.get('reason'), 220)}"
         )
     return "\n".join(lines) + "\n"
@@ -1030,6 +1104,7 @@ def render_selection_md(model: Dict[str, Any]) -> str:
         "# Sentinel Autonomous Priority Selection",
         "",
         f"- selected_task: `{model.get('selected_task')}`",
+        f"- selected_capability: `{model.get('selected_capability')}`",
         f"- reason: {redact_text(model.get('selected_task_reason'), 400)}",
         f"- score: `{model.get('selected_task_score')}`",
         f"- risk_class: `{model.get('selected_task_risk_class')}`",
@@ -1045,6 +1120,7 @@ def render_owner_summary_md(model: Dict[str, Any]) -> str:
         "# Sentinel Autonomous Priority Owner Summary",
         "",
         f"- selected next task: `{model.get('selected_task')}`",
+        f"- selected capability: `{model.get('selected_capability')}`",
         f"- anti-loop status: `{(model.get('anti_loop') or {}).get('status')}`",
         f"- diversity status: `{(model.get('diversity') or {}).get('status')}`",
         f"- cooldown respected: `{(model.get('anti_loop') or {}).get('cooldown_respected')}`",
@@ -1246,6 +1322,7 @@ def print_summary(report: Dict[str, Any]) -> None:
         selected = report["selected"].get("task")
     print(f"status={report.get('status')}")
     print(f"selected_task={selected or '-'}")
+    print(f"selected_capability={report.get('selected_capability') or '-'}")
     print(f"live_apply={report.get('live_apply', False)}")
     print(f"emergency_stop={report.get('emergency_stop', True)}")
     print(f"allowed_apply_now={report.get('allowed_apply_now', False)}")

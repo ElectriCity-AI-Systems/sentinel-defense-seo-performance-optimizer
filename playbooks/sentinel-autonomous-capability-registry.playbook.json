@@ -1,0 +1,42 @@
+{
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "email",
+    "payhip_api",
+    "wordpress",
+    "cloudflare",
+    "database",
+    "sftp_write",
+    "nginx",
+    "htaccess",
+    "systemd",
+    "cron",
+    "customer_data",
+    "HIGH_or_MEDIUM_execution"
+  ],
+  "capability_count": 11,
+  "capability_ids": [
+    "payhip_upload_pack_export",
+    "payhip_launch_qa",
+    "payhip_fulfillment_board",
+    "first_order_dryrun",
+    "service_proof_trend",
+    "public_client_assets",
+    "customer_intake_delivery",
+    "owner_dashboard_service_packaging",
+    "priority_engine",
+    "cycle_runner",
+    "autonomy_kernel"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-capability-registry",
+  "phase": "10.3",
+  "purpose": "Maintain hard allowlisted local Sentinel capabilities and their health metadata.",
+  "schema_version": "sentinel-autonomous-capability-registry-10.3"
+}

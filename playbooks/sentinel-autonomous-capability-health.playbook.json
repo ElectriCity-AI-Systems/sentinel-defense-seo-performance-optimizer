@@ -1,0 +1,21 @@
+{
+  "allowed_apply_now": false,
+  "capability_count": 11,
+  "emergency_stop": true,
+  "health_checks": [
+    "module_exists",
+    "py_compile",
+    "expected_outputs",
+    "freshness",
+    "json_valid",
+    "guard_status"
+  ],
+  "health_status": "CAPABILITY_HEALTH_WARNINGS",
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-capability-health",
+  "phase": "10.3",
+  "schema_version": "sentinel-autonomous-capability-registry-10.3"
+}
