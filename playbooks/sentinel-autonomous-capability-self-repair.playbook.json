@@ -1,0 +1,35 @@
+{
+  "allowed_apply_now": false,
+  "blocked_risks": [
+    "HIGH",
+    "LOW_LIVE",
+    "MEDIUM"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-capability-self-repair",
+  "phase": "10.4",
+  "safe_repair_risks": [
+    "DRAFT",
+    "LOW_EXPORT",
+    "LOW_LOCAL",
+    "LOW_STATE",
+    "READ_ONLY"
+  ],
+  "schema_version": "sentinel-autonomous-capability-health-governor-10.4",
+  "subprocess_allowlist": [
+    "sentinel_autonomous_capability_registry.py",
+    "sentinel_owner_dashboard_service_packaging.py",
+    "sentinel_payhip_customer_intake_delivery.py",
+    "sentinel_payhip_first_order_dryrun.py",
+    "sentinel_payhip_fulfillment_board.py",
+    "sentinel_payhip_launch_qa_finalizer.py",
+    "sentinel_payhip_public_client_assets.py",
+    "sentinel_payhip_upload_pack_export_helper.py",
+    "sentinel_service_proof_trend.py"
+  ]
+}

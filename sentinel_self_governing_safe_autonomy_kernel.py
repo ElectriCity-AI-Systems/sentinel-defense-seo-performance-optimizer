@@ -88,6 +88,7 @@ ALLOWED_AUTONOMOUS_TASKS = [
     "repair_missing_public_asset",
     "repair_invalid_json_output",
     "rebuild_manifest_and_checksums",
+    "repair_capability_health_warning",
     "update_learning_state",
     "write_audit_event",
     "generate_git_checkpoint_suggestion",
@@ -118,6 +119,7 @@ TASK_RISK_CLASS: Dict[str, str] = {
     "write_audit_event": LOW_STATE,
     "repair_invalid_json_output": LOW_STATE,
     "repair_missing_public_asset": LOW_STATE,
+    "repair_capability_health_warning": LOW_STATE,
     "rebuild_payhip_upload_pack": LOW_EXPORT,
     "rebuild_manifest_and_checksums": LOW_EXPORT,
 }
@@ -142,6 +144,7 @@ ALLOWED_MODULE_FILES = {
     "sentinel_payhip_public_client_assets.py",
     "sentinel_payhip_customer_intake_delivery.py",
     "sentinel_owner_dashboard_service_packaging.py",
+    "sentinel_autonomous_capability_health_governor.py",
 }
 ALLOWED_MODULE_ARGS = {
     "--self-test", "--build-export", "--build-copy-fields", "--build-upload-checklist",
@@ -152,7 +155,9 @@ ALLOWED_MODULE_ARGS = {
     "--build-sample-report", "--build-delivery-pack", "--collect-proof",
     "--analyze-decay", "--build-client-summary", "--build-payhip-proof",
     "--build-product-file", "--build-public-assets", "--build-descriptions",
-    "--build-faq", "--build-pdf-source", "--status",
+    "--build-faq", "--build-pdf-source", "--status", "--cycle",
+    "--scan-health", "--classify-warnings", "--plan-repairs",
+    "--execute-safe-repairs", "--validate-repairs", "--learn",
 }
 
 # Task -> (module file, [args]) for module-backed tasks. All others are internal.
@@ -164,6 +169,7 @@ TASK_EXEC: Dict[str, Tuple[str, List[str]]] = {
     "update_fulfillment_board": ("sentinel_payhip_fulfillment_board.py", ["--build-board"]),
     "run_first_order_dryrun": ("sentinel_payhip_first_order_dryrun.py", ["--status"]),
     "repair_missing_public_asset": ("sentinel_payhip_public_client_assets.py", ["--build-public-assets"]),
+    "repair_capability_health_warning": ("sentinel_autonomous_capability_health_governor.py", ["--cycle"]),
 }
 
 # ---------------------------------------------------------------------------
@@ -223,6 +229,7 @@ STATE_LATEST_JSON = STATE_DIR / "latest_self_governing_autonomy_kernel.json"
 TASK_MEMORY_JSON = STATE_DIR / "autonomy_task_memory.json"
 PRIORITY_MODEL_JSON = STATE_DIR / "autonomy_task_priority_model.json"
 CAPABILITY_REGISTRY_JSON = STATE_DIR / "autonomous_capability_registry.json"
+HEALTH_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_capability_health_governor.json"
 SUCCESS_PATTERNS_JSON = STATE_DIR / "autonomy_success_patterns.json"
 BLOCKED_PATTERNS_JSON = STATE_DIR / "autonomy_blocked_patterns.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomy_repair_patterns.json"
@@ -236,6 +243,7 @@ PRIORITY_RECOVERY_REPEAT_ALLOWED = {
 }
 PRIORITY_TASK_COOLDOWNS = {
     "generate_next_safe_actions": 2,
+    "repair_capability_health_warning": 2,
     "update_owner_summary": 2,
     "rebuild_payhip_upload_pack": 3,
     "rerun_payhip_launch_qa": 3,
@@ -270,10 +278,15 @@ FORBIDDEN_INSTALL_PATH_TOKENS = (
 )
 RECOMMENDED_GIT_CHECKPOINT = [
     "sentinel_self_governing_safe_autonomy_kernel.py",
+    "sentinel_autonomous_capability_health_governor.py",
     "playbooks/sentinel-self-governing-autonomy-kernel.playbook.json",
     "playbooks/sentinel-autonomy-cycle.playbook.json",
     "playbooks/sentinel-autonomy-task-classification.playbook.json",
     "playbooks/sentinel-autonomy-validation-repair.playbook.json",
+    "playbooks/sentinel-autonomous-capability-health-governor.playbook.json",
+    "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
+    "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",
+    "playbooks/sentinel-autonomous-capability-repair-validation.playbook.json",
 ]
 
 # ---------------------------------------------------------------------------
@@ -640,9 +653,16 @@ def _missing_or_stale(info: Dict[str, Any]) -> bool:
 def build_pending(observation: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Ordered list of (task, reason) by priority. First is the decision."""
     pending: List[Tuple[str, str]] = []
+    registry, registry_status = read_optional_json(CAPABILITY_REGISTRY_JSON)
+    registry_health = (registry.get("health") or {}).get("status") if registry_status == "ok" and isinstance(registry, dict) else None
+    governor, governor_status = read_optional_json(HEALTH_GOVERNOR_JSON)
+    governor_warnings = int(governor.get("warning_count") or 0) if governor_status == "ok" and isinstance(governor, dict) else 0
     if observation["broken_json"]:
         pending.append(("repair_invalid_json_output",
                         f"{len(observation['broken_json'])} broken JSON output(s) detected"))
+    if registry_health == "CAPABILITY_HEALTH_WARNINGS" or governor_warnings:
+        pending.append(("repair_capability_health_warning",
+                        "Capability health warnings are repairable by safe local governor"))
     if observation["missing_public_assets"]:
         pending.append(("repair_missing_public_asset",
                         f"{len(observation['missing_public_assets'])} public asset(s) missing"))
@@ -926,6 +946,10 @@ TASK_EXPECTED_OUTPUTS: Dict[str, List[str]] = {
     "run_first_order_dryrun": ["reports/latest/sentinel-payhip-first-order-dryrun.json"],
     "update_service_proof": ["reports/latest/sentinel-service-proof.json"],
     "repair_missing_public_asset": ["reports/latest/sentinel-payhip-public-service-overview.md"],
+    "repair_capability_health_warning": [
+        "reports/latest/sentinel-autonomous-capability-health-governor.json",
+        "reports/latest/sentinel-autonomous-capability-repair-validation.md",
+    ],
     "update_owner_summary": ["reports/latest/sentinel-autonomy-owner-summary.md"],
     "generate_next_safe_actions": ["reports/latest/sentinel-autonomy-next-cycle.md"],
 }
@@ -1154,6 +1178,17 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
     task = decision["selected_task"]
     classification = classify(task, observation, breach)
     capability_context = capability_context_for(task, decision)
+    health_governor, health_governor_status = read_optional_json(HEALTH_GOVERNOR_JSON)
+    health_governor_context = {
+        "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
+        "status": health_governor.get("status") if health_governor_status == "ok" and isinstance(health_governor, dict) else health_governor_status,
+        "before_health": health_governor.get("before_health") if isinstance(health_governor, dict) else None,
+        "after_health": health_governor.get("after_health") if isinstance(health_governor, dict) else None,
+        "warning_count": health_governor.get("warning_count") if isinstance(health_governor, dict) else 0,
+        "repairs_attempted": health_governor.get("planned_repair_count") if isinstance(health_governor, dict) else 0,
+        "repairs_successful": health_governor.get("executed_repair_count") if isinstance(health_governor, dict) else 0,
+        "repairs_blocked": health_governor.get("blocked_repair_count") if isinstance(health_governor, dict) else 0,
+    }
     execution = execute(classification, execute_flag)
     validation = validate(classification, execution, safety, breach)
     repair_res = repair(classification, execution, validation, observation, breach, execute_flag)
@@ -1176,6 +1211,11 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
         "capability_reason": capability_context.get("capability_reason"),
         "capability_risk": capability_context.get("capability_risk"),
         "capability_freshness": capability_context.get("capability_freshness"),
+        "capability_health_before": health_governor_context.get("before_health"),
+        "capability_health_after": health_governor_context.get("after_health"),
+        "repairs_attempted": health_governor_context.get("repairs_attempted"),
+        "repairs_successful": health_governor_context.get("repairs_successful"),
+        "repairs_blocked": health_governor_context.get("repairs_blocked"),
         "what_was_created": classification.get("expected_outputs", []),
         "what_was_validated": validation["status"],
         "what_was_blocked": (classification.get("reason_if_blocked")
@@ -1208,6 +1248,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
             "cooldown_respected": (decision.get("priority_engine") or {}).get("cooldown_respected"),
         },
         "capability_registry_integration": capability_context,
+        "capability_health_governor_integration": health_governor_context,
         "classification": classification,
         "execution": execution,
         "validation": validation,
@@ -1370,6 +1411,11 @@ def render_owner_summary_md(s: Dict[str, Any]) -> str:
              f"- Capability health: {redact_text(s.get('capability_health'))}",
              f"- Capability risk: {redact_text(s.get('capability_risk'))}",
              f"- Capability freshness: {redact_text(s.get('capability_freshness'))}",
+             f"- Capability health before: {redact_text(s.get('capability_health_before'))}",
+             f"- Capability health after: {redact_text(s.get('capability_health_after'))}",
+             f"- Repairs attempted: {redact_text(s.get('repairs_attempted'))}",
+             f"- Repairs successful: {redact_text(s.get('repairs_successful'))}",
+             f"- Repairs blocked: {redact_text(s.get('repairs_blocked'))}",
              f"- What was validated: {s['what_was_validated']}",
              f"- What was blocked: {redact_text(s['what_was_blocked'])}",
              f"- What was learned -> next: {redact_text(s['what_was_learned'])}",

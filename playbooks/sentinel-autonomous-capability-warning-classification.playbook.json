@@ -1,0 +1,28 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "current_warning_classes": [],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-capability-warning-classification",
+  "phase": "10.4",
+  "schema_version": "sentinel-autonomous-capability-health-governor-10.4",
+  "warning_classes": [
+    "BLOCKED_CAPABILITY",
+    "EMPTY_MARKDOWN",
+    "EMPTY_TEXT",
+    "INVALID_JSON",
+    "LOW_USEFULNESS",
+    "MISSING_EXPECTED_OUTPUT",
+    "MISSING_EXPORT_FILE",
+    "MISSING_OWNER_SUMMARY",
+    "MISSING_PLAYBOOK",
+    "MISSING_STATUS_REPORT",
+    "REPEATED_FAILURE",
+    "STALE_OUTPUT",
+    "UNKNOWN_WARNING"
+  ]
+}

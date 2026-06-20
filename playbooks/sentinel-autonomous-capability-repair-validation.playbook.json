@@ -1,0 +1,21 @@
+{
+  "after_health": "CAPABILITY_HEALTH_OK",
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-capability-repair-validation",
+  "phase": "10.4",
+  "schema_version": "sentinel-autonomous-capability-health-governor-10.4",
+  "validation_checks": [
+    "expected files present",
+    "json valid",
+    "markdown non-empty",
+    "no secrets",
+    "no customer markers",
+    "safe defaults unchanged"
+  ]
+}

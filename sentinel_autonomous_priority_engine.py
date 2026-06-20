@@ -51,6 +51,7 @@ ALLOWED_TASKS = [
     "repair_missing_public_asset",
     "repair_invalid_json_output",
     "rebuild_manifest_and_checksums",
+    "repair_capability_health_warning",
     "update_learning_state",
     "write_audit_event",
     "generate_git_checkpoint_suggestion",
@@ -80,10 +81,12 @@ TASK_RISK: Dict[str, str] = {
     "repair_missing_public_asset": LOW_STATE,
     "rebuild_payhip_upload_pack": LOW_EXPORT,
     "rebuild_manifest_and_checksums": LOW_EXPORT,
+    "repair_capability_health_warning": LOW_STATE,
 }
 
 TASK_COOLDOWNS = {
     "generate_next_safe_actions": 2,
+    "repair_capability_health_warning": 2,
     "update_owner_summary": 2,
     "rebuild_payhip_upload_pack": 3,
     "rerun_payhip_launch_qa": 3,
@@ -111,6 +114,7 @@ BUSINESS_VALUE = {
     "repair_invalid_json_output": 45,
     "repair_missing_public_asset": 40,
     "rebuild_manifest_and_checksums": 38,
+    "repair_capability_health_warning": 42,
     "write_audit_event": 3,
     "update_learning_state": 4,
 }
@@ -118,6 +122,7 @@ BUSINESS_VALUE = {
 LEARNING_VALUE = {
     "check_missing_inputs": 15,
     "check_public_asset_safety": 14,
+    "repair_capability_health_warning": 16,
     "observe_project_state": 12,
     "generate_next_safe_actions": 10,
     "generate_git_checkpoint_suggestion": 9,
@@ -148,6 +153,10 @@ TASK_OUTPUTS: Dict[str, List[str]] = {
         "exports/payhip-upload-pack/latest/MANIFEST.json",
         "exports/payhip-upload-pack/latest/CHECKSUMS.sha256",
     ],
+    "repair_capability_health_warning": [
+        "reports/latest/sentinel-autonomous-capability-health-governor.json",
+        "reports/latest/sentinel-autonomous-capability-repair-validation.md",
+    ],
     "generate_git_checkpoint_suggestion": ["reports/latest/sentinel-autonomy-git-checkpoint-suggestion.md"],
 }
 
@@ -165,6 +174,7 @@ TASK_TO_CAPABILITY = {
     "repair_missing_public_asset": "public_client_assets",
     "repair_invalid_json_output": "autonomy_kernel",
     "rebuild_manifest_and_checksums": "payhip_upload_pack_export",
+    "repair_capability_health_warning": "autonomy_kernel",
     "update_learning_state": "autonomy_kernel",
     "write_audit_event": "autonomy_kernel",
     "generate_git_checkpoint_suggestion": "priority_engine",
@@ -184,6 +194,7 @@ LATEST_KERNEL_JSON = PROJECT_DIR / "state/adaptive-learning/latest_self_governin
 LATEST_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_cycle_runner.json"
 EXPORT_LATEST_DIR = PROJECT_DIR / "exports/payhip-upload-pack/latest"
 CAPABILITY_REGISTRY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_registry.json"
+HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.md"
@@ -457,6 +468,7 @@ def read_inputs() -> Dict[str, Any]:
         LATEST_KERNEL_JSON,
         LATEST_RUNNER_JSON,
         CAPABILITY_REGISTRY_JSON,
+        HEALTH_GOVERNOR_JSON,
     ]
     statuses: Dict[str, str] = {}
     missing: List[str] = []
@@ -471,6 +483,7 @@ def read_inputs() -> Dict[str, Any]:
     kernel = load_dict(KERNEL_JSON) or load_dict(LATEST_KERNEL_JSON)
     runner = load_dict(RUNNER_JSON) or load_dict(LATEST_RUNNER_JSON)
     capability_registry = load_dict(CAPABILITY_REGISTRY_JSON)
+    health_governor = load_dict(HEALTH_GOVERNOR_JSON)
     git_status = exact_git_command("status")
     git_log = exact_git_command("log")
     return {
@@ -480,6 +493,7 @@ def read_inputs() -> Dict[str, Any]:
         "kernel": kernel,
         "runner": runner,
         "capability_registry": capability_registry,
+        "health_governor": health_governor,
         "recent_tasks": collect_recent_tasks(),
         "critical_json": critical_json_scan(),
         "public_assets": public_assets_status(),
@@ -500,6 +514,47 @@ def capability_index(inputs: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         str(cap.get("capability_id")): cap
         for cap in caps
         if isinstance(cap, dict) and cap.get("capability_id")
+    }
+
+
+def health_governor_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    governor = inputs.get("health_governor")
+    if not isinstance(governor, dict):
+        return {
+            "warning_count": 0,
+            "repairable_by_capability": {},
+            "blocked_by_capability": {},
+            "repaired_by_capability": {},
+            "status": "not_available",
+        }
+    after_health = governor.get("after_health")
+    validation_ok = str(governor.get("validation_status") or governor.get("status") or "").endswith("_OK")
+    warnings_are_active = not (after_health == "CAPABILITY_HEALTH_OK" and validation_ok)
+    repairable: Dict[str, int] = {}
+    blocked: Dict[str, int] = {}
+    repaired: Dict[str, int] = {}
+    if warnings_are_active:
+        for warning in governor.get("classified_warnings") or governor.get("warnings") or []:
+            if not isinstance(warning, dict):
+                continue
+            cap = str(warning.get("capability_id") or "unknown")
+            if warning.get("can_plan_repair") or warning.get("repairable"):
+                repairable[cap] = repairable.get(cap, 0) + 1
+            else:
+                blocked[cap] = blocked.get(cap, 0) + 1
+    for item in governor.get("executed_repairs") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") in {"executed", "deduplicated_already_executed"}:
+            cap = str(item.get("capability_id") or "unknown")
+            repaired[cap] = repaired.get(cap, 0) + 1
+    return {
+        "warning_count": int(governor.get("warning_count") or 0) if warnings_are_active else 0,
+        "repairable_by_capability": repairable,
+        "blocked_by_capability": blocked,
+        "repaired_by_capability": repaired,
+        "status": governor.get("status") or "available",
+        "after_health": after_health,
     }
 
 
@@ -577,6 +632,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
     kernel = inputs["kernel"]
     runner = inputs["runner"]
     capabilities = capability_index(inputs)
+    health_governor = health_governor_index(inputs)
     breach = bool(kernel.get("breach") or runner.get("breach"))
     forbidden_stop = breach
     scores: List[Dict[str, Any]] = []
@@ -593,6 +649,11 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             capability_usefulness = min(18, max(-20, int(cap.get("usefulness_score") or 0) // 4))
             capability_freshness_gap = max(0, 100 - int(cap.get("freshness_score") or 100)) // 8
             capability_blocked = cap.get("can_run_autonomously") is False
+        cap_repairable_warnings = int((health_governor.get("repairable_by_capability") or {}).get(cap_id or "", 0))
+        cap_blocked_warnings = int((health_governor.get("blocked_by_capability") or {}).get(cap_id or "", 0))
+        cap_repaired = int((health_governor.get("repaired_by_capability") or {}).get(cap_id or "", 0))
+        if cap_repaired:
+            capability_usefulness += min(10, cap_repaired * 3)
         urgency = 0
         repair_value = 0
         validation_failure = 0
@@ -649,6 +710,13 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         if task == "generate_next_safe_actions":
             urgency += 8
             reason_parts.append("fallback_safe_action_generation")
+        if task == "repair_capability_health_warning" and health_governor.get("warning_count"):
+            urgency += 50
+            repair_value += min(50, 20 + int(health_governor.get("warning_count") or 0) * 8)
+            reason_parts.append("capability_health_warnings_present")
+        if cap_repairable_warnings:
+            repair_value += min(20, cap_repairable_warnings * 8)
+            reason_parts.append(f"capability_repairable_warnings_{cap_repairable_warnings}")
 
         if kernel.get("validation", {}).get("status") not in (None, "PASS"):
             validation_failure += 18
@@ -673,6 +741,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         if cap and capability_blocked:
             blocked_penalty += 85
             reason_parts.append(f"capability_blocked:{cap_id}")
+        if cap_blocked_warnings:
+            blocked_penalty += min(40, cap_blocked_warnings * 10)
+            reason_parts.append(f"capability_blocked_warnings_{cap_blocked_warnings}")
         if task == "repair_invalid_json_output" and not broken_json:
             blocked_penalty += 90
             reason_parts.append("no_broken_json_to_repair")
@@ -686,6 +757,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         ):
             blocked_penalty += 30
             reason_parts.append("manifest_and_checksums_present")
+        if task == "repair_capability_health_warning" and not health_governor.get("warning_count"):
+            blocked_penalty += 80
+            reason_parts.append("no_capability_health_warning_to_repair")
         if forbidden_stop:
             blocked_penalty += 10000
             reason_parts.append("breach_or_forbidden_stop")
@@ -730,6 +804,8 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             and task not in COMPANION_ONLY_TASKS
             and not forbidden_stop
             and blocked_penalty == 0
+            and cooldown == 0
+            and not (last_task == task and task not in RECOVERY_REPEAT_ALLOWED)
             and r_penalty == 0
             and not max_window_block(task, recent)
         )
@@ -742,6 +818,10 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             "capability_id": cap_id,
             "capability_status": cap.get("health_status") if cap else "registry_missing_or_unmapped",
             "capability_can_run_autonomously": cap.get("can_run_autonomously") if cap else None,
+            "health_governor_status": health_governor.get("status"),
+            "capability_repairable_warning_count": cap_repairable_warnings,
+            "capability_blocked_warning_count": cap_blocked_warnings,
+            "capability_successful_repair_count": cap_repaired,
             "reason": ", ".join(reason_parts) if reason_parts else "normal_rotation",
             "components": components,
             "outputs": outputs.get(task, {}),
@@ -777,6 +857,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
 
 def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
     registry = inputs.get("capability_registry")
+    governor = health_governor_index(inputs)
     registry_status = "ok" if isinstance(registry, dict) and registry.get("capabilities") else "missing_or_invalid"
     return {
         "missing_inputs": inputs.get("missing_inputs", []),
@@ -785,6 +866,8 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "manifest": inputs.get("manifest", {}),
         "capability_registry_status": registry_status,
         "capability_count": len(registry.get("capabilities", [])) if isinstance(registry, dict) else 0,
+        "health_governor_status": governor.get("status"),
+        "health_governor_warning_count": governor.get("warning_count"),
         "git_status_count": len((inputs.get("git_status") or {}).get("lines") or []),
         "git_log_count": len((inputs.get("git_log") or {}).get("lines") or []),
     }
@@ -901,6 +984,11 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "selected_capability": selected_capability,
             "selected_capability_status": selected_capability_status,
         },
+        "health_governor_integration": {
+            "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
+            "status": (scoring.get("inputs") or {}).get("health_governor_status"),
+            "warning_count": (scoring.get("inputs") or {}).get("health_governor_warning_count"),
+        },
         "hard_defaults": HARD_DEFAULTS,
         "live_apply": False,
         "emergency_stop": True,
@@ -911,6 +999,7 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "breach": bool(scoring.get("breach")),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_priority_engine.py",
+            "sentinel_autonomous_capability_health_governor.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
             "playbooks/sentinel-autonomous-priority-engine.playbook.json",
@@ -1256,7 +1345,7 @@ def action_self_test() -> Dict[str, Any]:
     failures.extend(source_safety_findings(source))
     if set(ALLOWED_TASKS) != set(TASK_RISK):
         failures.append("allowed_tasks_and_risk_map_mismatch")
-    if len(ALLOWED_TASKS) != 16:
+    if len(ALLOWED_TASKS) != 17:
         failures.append("allowed_task_count_mismatch")
     for task in ALLOWED_TASKS:
         if TASK_RISK.get(task) in BLOCKED_RISK:

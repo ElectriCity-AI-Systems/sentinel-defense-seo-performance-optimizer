@@ -283,6 +283,7 @@ HEALTH_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_healt
 HISTORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_history.json"
 ROUTER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_skill_router_state.json"
 COOLDOWNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_cooldowns.json"
+HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
 
 TASK_MEMORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_memory.json"
 SUCCESS_PATTERNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_success_patterns.json"
@@ -689,20 +690,42 @@ def health_summary(registry: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def health_governor_summary() -> Dict[str, Any]:
+    governor = load_dict(HEALTH_GOVERNOR_JSON)
+    executed = governor.get("executed_repairs") if isinstance(governor.get("executed_repairs"), list) else []
+    last_repair = executed[-1] if executed else {}
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
+        "available": bool(governor),
+        "last_status": governor.get("status") if governor else "not_available",
+        "last_repair_action": last_repair.get("repair_action"),
+        "repaired_warning_count": int(governor.get("executed_repair_count") or 0) if governor else 0,
+        "blocked_repair_count": int(governor.get("blocked_repair_count") or 0) if governor else 0,
+        "after_health_status": governor.get("after_health") if governor else None,
+    }
+
+
 def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY") -> Dict[str, Any]:
     registry = discover_capabilities()
     router = route_next_skill(registry)
     health = health_summary(registry)
+    governor = health_governor_summary()
     registry.update({
         "status": status,
         "health": health,
+        "health_governor": governor,
         "router": router,
         "recommended_capability": router.get("selected_capability"),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
+            "playbooks/sentinel-autonomous-capability-health-governor.playbook.json",
+            "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
+            "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",
+            "playbooks/sentinel-autonomous-capability-repair-validation.playbook.json",
             "playbooks/sentinel-autonomous-capability-registry.playbook.json",
             "playbooks/sentinel-autonomous-skill-router.playbook.json",
             "playbooks/sentinel-autonomous-capability-health.playbook.json",
@@ -764,6 +787,7 @@ def capability_cooldowns(registry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def render_registry_md(registry: Dict[str, Any]) -> str:
+    governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
     lines = [
         "# Sentinel Autonomous Capability Registry",
         "",
@@ -772,6 +796,9 @@ def render_registry_md(registry: Dict[str, Any]) -> str:
         f"- discovered: `{len(registry.get('discovered_capabilities') or [])}`",
         f"- missing: `{len(registry.get('missing_capabilities') or [])}`",
         f"- recommended_capability: `{registry.get('recommended_capability')}`",
+        f"- health_governor_status: `{governor.get('last_status', 'not_available')}`",
+        f"- repaired_warning_count: `{governor.get('repaired_warning_count', 0)}`",
+        f"- blocked_repair_count: `{governor.get('blocked_repair_count', 0)}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -791,6 +818,7 @@ def render_registry_md(registry: Dict[str, Any]) -> str:
 
 def render_health_md(registry: Dict[str, Any]) -> str:
     health = registry.get("health", {})
+    governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
     lines = [
         "# Sentinel Autonomous Capability Health",
         "",
@@ -799,6 +827,8 @@ def render_health_md(registry: Dict[str, Any]) -> str:
         f"- needs_refresh_count: `{health.get('needs_refresh_count')}`",
         f"- missing_count: `{health.get('missing_count')}`",
         f"- blocked_count: `{health.get('blocked_count')}`",
+        f"- governor_after_health: `{governor.get('after_health_status', '-')}`",
+        f"- governor_last_repair_action: `{governor.get('last_repair_action', '-')}`",
         "",
     ]
     for cap in registry.get("capabilities", []):
@@ -844,11 +874,17 @@ def render_skill_map_md(registry: Dict[str, Any]) -> str:
 
 def render_owner_summary_md(registry: Dict[str, Any]) -> str:
     router = registry.get("router", {})
+    governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
     return "\n".join([
         "# Sentinel Skill Router Owner Summary",
         "",
         f"- registry_status: `{registry.get('status')}`",
         f"- capability_health: `{(registry.get('health') or {}).get('status')}`",
+        f"- health_governor_status: `{governor.get('last_status', 'not_available')}`",
+        f"- last_repair_action: `{governor.get('last_repair_action', '-')}`",
+        f"- repaired_warning_count: `{governor.get('repaired_warning_count', 0)}`",
+        f"- blocked_repair_count: `{governor.get('blocked_repair_count', 0)}`",
+        f"- after_health_status: `{governor.get('after_health_status', '-')}`",
         f"- routed_next_skill: `{router.get('selected_capability')}`",
         f"- routed_module: `{router.get('selected_module')}`",
         f"- missing_capabilities: `{', '.join(registry.get('missing_capabilities') or []) or '-'}`",

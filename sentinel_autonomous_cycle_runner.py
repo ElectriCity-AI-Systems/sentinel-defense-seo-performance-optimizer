@@ -25,6 +25,7 @@ KERNEL_FILE = PROJECT_DIR / "sentinel_self_governing_safe_autonomy_kernel.py"
 KERNEL_JSON = PROJECT_DIR / "reports/latest/sentinel-self-governing-autonomy-kernel.json"
 KERNEL_LATEST_JSON = PROJECT_DIR / "state/adaptive-learning/latest_self_governing_autonomy_kernel.json"
 PRIORITY_MODEL_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_priority_model.json"
+HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.md"
@@ -281,6 +282,20 @@ def capability_diversity_stats(cycles: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def health_governor_summary() -> Dict[str, Any]:
+    data = load_dict(HEALTH_GOVERNOR_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
+        "available": bool(data),
+        "status": data.get("status") if data else "not_available",
+        "capability_health_before": data.get("before_health") if data else None,
+        "capability_health_after": data.get("after_health") if data else None,
+        "repairs_attempted": int(data.get("planned_repair_count") or 0) if data else 0,
+        "repairs_successful": int(data.get("executed_repair_count") or 0) if data else 0,
+        "repairs_blocked": int(data.get("blocked_repair_count") or 0) if data else 0,
+    }
+
+
 def command_is_allowlisted(cmd: List[str]) -> bool:
     return cmd in ALLOWED_KERNEL_COMMANDS.values()
 
@@ -514,6 +529,7 @@ def cycle_result(cycle_index: int, started_at: str, finished_at: str, proc: Dict
     owner = data.get("owner_summary") if isinstance(data.get("owner_summary"), dict) else {}
     priority = data.get("priority_engine_integration") if isinstance(data.get("priority_engine_integration"), dict) else {}
     capability = data.get("capability_registry_integration") if isinstance(data.get("capability_registry_integration"), dict) else {}
+    governor = data.get("capability_health_governor_integration") if isinstance(data.get("capability_health_governor_integration"), dict) else {}
     decision_priority = decision.get("priority_engine") if isinstance(decision.get("priority_engine"), dict) else {}
     generated = list(classification.get("expected_outputs") or owner.get("what_was_created") or [])
     useful = list(learning.get("useful_outputs") or [])
@@ -537,6 +553,11 @@ def cycle_result(cycle_index: int, started_at: str, finished_at: str, proc: Dict
         "capability_status": capability.get("capability_health"),
         "capability_risk": capability.get("capability_risk"),
         "capability_freshness": capability.get("capability_freshness"),
+        "capability_health_before": governor.get("before_health"),
+        "capability_health_after": governor.get("after_health"),
+        "repairs_attempted": governor.get("repairs_attempted"),
+        "repairs_successful": governor.get("repairs_successful"),
+        "repairs_blocked": governor.get("repairs_blocked"),
         "capability_cooldown_respected": priority.get("cooldown_respected") if "cooldown_respected" in priority else decision_priority.get("cooldown_respected"),
         "breach": bool(data.get("breach")),
         "stop_reason": None,
@@ -661,6 +682,7 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
         lock_release = release_lock(status)
 
     report = base_report("run-once" if run_once else "run-cycles", status)
+    governor_summary = health_governor_summary()
     report.update({
         "requested_cycles": max_cycles,
         "cycles_completed": len(cycles),
@@ -673,6 +695,12 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
         "task_diversity": task_diversity_stats(cycles),
         "selected_capabilities": [c.get("selected_capability") for c in cycles if c.get("selected_capability")],
         "capability_diversity": capability_diversity_stats(cycles),
+        "capability_health_before": governor_summary.get("capability_health_before"),
+        "capability_health_after": governor_summary.get("capability_health_after"),
+        "repairs_attempted": governor_summary.get("repairs_attempted"),
+        "repairs_successful": governor_summary.get("repairs_successful"),
+        "repairs_blocked": governor_summary.get("repairs_blocked"),
+        "health_governor": governor_summary,
         "anti_loop_status": task_diversity_stats(cycles).get("anti_loop_status"),
         "next_best_task": task_diversity_stats(cycles).get("next_best_task"),
         "validation_status": STATUS_VALIDATION_OK if status == STATUS_RUN_OK else STATUS_VALIDATION_FAILED,
@@ -1015,6 +1043,11 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- task_diversity: `{diversity.get('status', '-')}`",
         f"- capability_diversity: `{capability_diversity.get('status', '-')}`",
         f"- unique_capability_count: `{capability_diversity.get('unique_capability_count', '-')}`",
+        f"- capability_health_before: `{report.get('capability_health_before', '-')}`",
+        f"- capability_health_after: `{report.get('capability_health_after', '-')}`",
+        f"- repairs_attempted: `{report.get('repairs_attempted', 0)}`",
+        f"- repairs_successful: `{report.get('repairs_successful', 0)}`",
+        f"- repairs_blocked: `{report.get('repairs_blocked', 0)}`",
         f"- unique_task_count: `{diversity.get('unique_task_count', '-')}`",
         f"- repeated_task_count: `{diversity.get('repeated_task_count', '-')}`",
         f"- cooldown_respected: `{diversity.get('cooldown_respected', '-')}`",
