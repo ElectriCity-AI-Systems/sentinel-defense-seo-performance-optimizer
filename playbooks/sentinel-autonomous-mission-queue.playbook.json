@@ -1,0 +1,28 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-queue",
+  "phase": "10.5",
+  "schema_version": "sentinel-autonomous-goal-manager-10.5",
+  "score_components": [
+    "urgency",
+    "business",
+    "safety",
+    "learning",
+    "freshness",
+    "missing_outputs",
+    "warnings",
+    "repair",
+    "penalties"
+  ],
+  "sorting": [
+    "can_execute_autonomously",
+    "priority_score",
+    "mission_type"
+  ]
+}

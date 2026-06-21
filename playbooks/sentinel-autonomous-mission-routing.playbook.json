@@ -1,0 +1,93 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-routing",
+  "phase": "10.5",
+  "routing": {
+    "generate_git_checkpoint_suggestion": [
+      "priority_engine",
+      "generate_git_checkpoint_suggestion"
+    ],
+    "generate_next_safe_actions": [
+      "autonomy_kernel",
+      "generate_next_safe_actions"
+    ],
+    "keep_first_order_dryrun_ready": [
+      "first_order_dryrun",
+      "run_first_order_dryrun"
+    ],
+    "keep_fulfillment_board_ready": [
+      "payhip_fulfillment_board",
+      "update_fulfillment_board"
+    ],
+    "keep_payhip_launch_qa_ready": [
+      "payhip_launch_qa",
+      "rerun_payhip_launch_qa"
+    ],
+    "keep_payhip_upload_pack_ready": [
+      "payhip_upload_pack_export",
+      "rebuild_payhip_upload_pack"
+    ],
+    "maintain_capability_health": [
+      "capability_health_governor",
+      "repair_capability_health_warning"
+    ],
+    "maintain_capability_registry": [
+      "capability_registry",
+      "generate_next_safe_actions"
+    ],
+    "maintain_learning_state": [
+      "autonomy_kernel",
+      "update_learning_state"
+    ],
+    "maintain_owner_summary": [
+      "owner_dashboard_service_packaging",
+      "update_owner_summary"
+    ],
+    "maintain_priority_model": [
+      "priority_engine",
+      "generate_next_safe_actions"
+    ],
+    "maintain_public_client_assets": [
+      "public_client_assets",
+      "check_public_asset_safety"
+    ],
+    "maintain_service_proof": [
+      "service_proof_trend",
+      "update_service_proof"
+    ],
+    "monitor_ai_radio_timeout_decay": [
+      "autonomy_kernel",
+      "observe_project_state"
+    ],
+    "monitor_sourcemap_warning": [
+      "autonomy_kernel",
+      "observe_project_state"
+    ],
+    "monitor_website_warning_readiness": [
+      "autonomy_kernel",
+      "observe_project_state"
+    ]
+  },
+  "schema_version": "sentinel-autonomous-goal-manager-10.5",
+  "subprocess_modules": [
+    "sentinel_autonomous_capability_health_governor.py",
+    "sentinel_autonomous_capability_registry.py",
+    "sentinel_autonomous_cycle_runner.py",
+    "sentinel_autonomous_priority_engine.py",
+    "sentinel_owner_dashboard_service_packaging.py",
+    "sentinel_payhip_customer_intake_delivery.py",
+    "sentinel_payhip_first_order_dryrun.py",
+    "sentinel_payhip_fulfillment_board.py",
+    "sentinel_payhip_launch_qa_finalizer.py",
+    "sentinel_payhip_public_client_assets.py",
+    "sentinel_payhip_upload_pack_export_helper.py",
+    "sentinel_self_governing_safe_autonomy_kernel.py",
+    "sentinel_service_proof_trend.py"
+  ]
+}

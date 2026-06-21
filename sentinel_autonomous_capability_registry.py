@@ -284,6 +284,7 @@ HISTORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_hist
 ROUTER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_skill_router_state.json"
 COOLDOWNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_cooldowns.json"
 HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
+GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
 
 TASK_MEMORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_memory.json"
 SUCCESS_PATTERNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_success_patterns.json"
@@ -705,19 +706,51 @@ def health_governor_summary() -> Dict[str, Any]:
     }
 
 
+def goal_manager_summary() -> Dict[str, Any]:
+    goal = load_dict(GOAL_MANAGER_JSON)
+    missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
+    if not isinstance(missions, list):
+        missions = []
+    by_capability: Dict[str, List[str]] = {}
+    active: List[Dict[str, Any]] = []
+    for mission in missions:
+        if not isinstance(mission, dict):
+            continue
+        cap = str(mission.get("linked_capability") or "unmapped")
+        mission_type = str(mission.get("mission_type") or "unknown")
+        by_capability.setdefault(cap, []).append(mission_type)
+        if mission.get("completion_status") != "COMPLETE_FRESH" and mission.get("status") not in {"COMPLETED"}:
+            active.append(mission)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
+        "available": bool(goal),
+        "goal_manager_status": goal.get("status") if goal else "not_available",
+        "selected_mission": goal.get("selected_mission_type") if goal else None,
+        "mission_count": len(missions),
+        "active_mission_count": len(active),
+        "mission_linked_capabilities": sorted(by_capability),
+        "capability_mission_status": {
+            cap: ",".join(sorted(set(items))) for cap, items in sorted(by_capability.items())
+        },
+    }
+
+
 def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY") -> Dict[str, Any]:
     registry = discover_capabilities()
     router = route_next_skill(registry)
     health = health_summary(registry)
     governor = health_governor_summary()
+    goals = goal_manager_summary()
     registry.update({
         "status": status,
         "health": health,
         "health_governor": governor,
+        "goal_manager": goals,
         "router": router,
         "recommended_capability": router.get("selected_capability"),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_capability_health_governor.py",
+            "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
@@ -726,6 +759,10 @@ def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY"
             "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
             "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",
             "playbooks/sentinel-autonomous-capability-repair-validation.playbook.json",
+            "playbooks/sentinel-autonomous-goal-manager.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue.playbook.json",
+            "playbooks/sentinel-autonomous-mission-routing.playbook.json",
+            "playbooks/sentinel-autonomous-mission-validation.playbook.json",
             "playbooks/sentinel-autonomous-capability-registry.playbook.json",
             "playbooks/sentinel-autonomous-skill-router.playbook.json",
             "playbooks/sentinel-autonomous-capability-health.playbook.json",
@@ -788,6 +825,7 @@ def capability_cooldowns(registry: Dict[str, Any]) -> Dict[str, Any]:
 
 def render_registry_md(registry: Dict[str, Any]) -> str:
     governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
+    goals = registry.get("goal_manager") if isinstance(registry.get("goal_manager"), dict) else {}
     lines = [
         "# Sentinel Autonomous Capability Registry",
         "",
@@ -797,6 +835,9 @@ def render_registry_md(registry: Dict[str, Any]) -> str:
         f"- missing: `{len(registry.get('missing_capabilities') or [])}`",
         f"- recommended_capability: `{registry.get('recommended_capability')}`",
         f"- health_governor_status: `{governor.get('last_status', 'not_available')}`",
+        f"- goal_manager_status: `{goals.get('goal_manager_status', 'not_available')}`",
+        f"- active_mission_count: `{goals.get('active_mission_count', 0)}`",
+        f"- mission_linked_capabilities: `{', '.join(goals.get('mission_linked_capabilities') or []) or '-'}`",
         f"- repaired_warning_count: `{governor.get('repaired_warning_count', 0)}`",
         f"- blocked_repair_count: `{governor.get('blocked_repair_count', 0)}`",
         "- live_apply: `False`",
@@ -875,6 +916,7 @@ def render_skill_map_md(registry: Dict[str, Any]) -> str:
 def render_owner_summary_md(registry: Dict[str, Any]) -> str:
     router = registry.get("router", {})
     governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
+    goals = registry.get("goal_manager") if isinstance(registry.get("goal_manager"), dict) else {}
     return "\n".join([
         "# Sentinel Skill Router Owner Summary",
         "",
@@ -885,6 +927,9 @@ def render_owner_summary_md(registry: Dict[str, Any]) -> str:
         f"- repaired_warning_count: `{governor.get('repaired_warning_count', 0)}`",
         f"- blocked_repair_count: `{governor.get('blocked_repair_count', 0)}`",
         f"- after_health_status: `{governor.get('after_health_status', '-')}`",
+        f"- goal_manager_status: `{goals.get('goal_manager_status', 'not_available')}`",
+        f"- selected_mission: `{goals.get('selected_mission', '-')}`",
+        f"- active_mission_count: `{goals.get('active_mission_count', 0)}`",
         f"- routed_next_skill: `{router.get('selected_capability')}`",
         f"- routed_module: `{router.get('selected_module')}`",
         f"- missing_capabilities: `{', '.join(registry.get('missing_capabilities') or []) or '-'}`",

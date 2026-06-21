@@ -1,0 +1,39 @@
+{
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "external_api",
+    "timer_install",
+    "HIGH_or_MEDIUM_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "mission_types": [
+    "maintain_capability_health",
+    "keep_payhip_upload_pack_ready",
+    "keep_payhip_launch_qa_ready",
+    "keep_fulfillment_board_ready",
+    "keep_first_order_dryrun_ready",
+    "maintain_service_proof",
+    "maintain_public_client_assets",
+    "maintain_owner_summary",
+    "monitor_website_warning_readiness",
+    "monitor_sourcemap_warning",
+    "monitor_ai_radio_timeout_decay",
+    "maintain_priority_model",
+    "maintain_capability_registry",
+    "maintain_learning_state",
+    "generate_git_checkpoint_suggestion",
+    "generate_next_safe_actions"
+  ],
+  "name": "sentinel-autonomous-goal-manager",
+  "phase": "10.5",
+  "purpose": "Discover goals, manage safe local mission queues and route one safe mission step.",
+  "schema_version": "sentinel-autonomous-goal-manager-10.5"
+}

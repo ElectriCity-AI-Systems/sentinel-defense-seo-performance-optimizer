@@ -1,0 +1,19 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "checks": [
+    "queue json valid",
+    "mission status consistent",
+    "expected outputs valid",
+    "no secrets",
+    "safe defaults unchanged"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-validation",
+  "phase": "10.5",
+  "schema_version": "sentinel-autonomous-goal-manager-10.5"
+}

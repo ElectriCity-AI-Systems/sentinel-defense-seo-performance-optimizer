@@ -230,6 +230,7 @@ TASK_MEMORY_JSON = STATE_DIR / "autonomy_task_memory.json"
 PRIORITY_MODEL_JSON = STATE_DIR / "autonomy_task_priority_model.json"
 CAPABILITY_REGISTRY_JSON = STATE_DIR / "autonomous_capability_registry.json"
 HEALTH_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_capability_health_governor.json"
+GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
 SUCCESS_PATTERNS_JSON = STATE_DIR / "autonomy_success_patterns.json"
 BLOCKED_PATTERNS_JSON = STATE_DIR / "autonomy_blocked_patterns.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomy_repair_patterns.json"
@@ -729,6 +730,8 @@ def priority_model_decision(observation: Dict[str, Any],
             "selected_task_score": candidate.get("score", model.get("selected_task_score")),
             "selected_capability": candidate.get("capability_id") or model.get("selected_capability"),
             "capability_status": candidate.get("capability_status") or model.get("selected_capability_status"),
+            "selected_mission": candidate.get("mission_type") or model.get("selected_mission"),
+            "mission_status": candidate.get("mission_status") or model.get("selected_mission_status"),
             "anti_loop_status": (model.get("anti_loop") or {}).get("status"),
             "diversity_status": (model.get("diversity") or {}).get("status"),
             "cooldown_respected": (model.get("anti_loop") or {}).get("cooldown_respected"),
@@ -854,6 +857,52 @@ def capability_context_for(task: str, decision: Dict[str, Any]) -> Dict[str, Any
         "capability_usefulness": selected.get("usefulness_score"),
         "capability_priority": selected.get("priority_score"),
         "capability_can_run_autonomously": selected.get("can_run_autonomously"),
+    }
+
+
+def mission_context_for(task: str, decision: Dict[str, Any]) -> Dict[str, Any]:
+    goal, status = read_optional_json(GOAL_MANAGER_JSON)
+    selected_mission = (decision.get("priority_engine") or {}).get("selected_mission")
+    if not selected_mission:
+        model, model_status = read_optional_json(PRIORITY_MODEL_JSON)
+        if model_status == "ok" and isinstance(model, dict):
+            selected_mission = model.get("selected_mission")
+    if status != "ok" or not isinstance(goal, dict):
+        return {
+            "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
+            "goal_manager_status": status,
+            "selected_mission": selected_mission,
+            "mission_reason": "goal manager state missing; kernel falls back to task-level decision",
+            "mission_risk": TASK_RISK_CLASS.get(task, HIGH),
+            "mission_status": "goal_state_unavailable",
+            "mission_completion_status": None,
+            "next_mission": None,
+        }
+    missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
+    if not isinstance(missions, list):
+        missions = []
+    selected = None
+    for mission in missions:
+        if not isinstance(mission, dict):
+            continue
+        if selected_mission and mission.get("mission_type") == selected_mission:
+            selected = mission
+            break
+        if task in (mission.get("linked_tasks") or []) and selected is None:
+            selected = mission
+    if not selected and isinstance(goal.get("selected_mission"), dict):
+        selected = goal["selected_mission"]
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
+        "goal_manager_status": goal.get("status"),
+        "selected_mission": selected.get("mission_type") if selected else selected_mission,
+        "mission_reason": selected.get("trigger_source") if selected else "no mission mapped to selected task",
+        "mission_risk": selected.get("risk_class") if selected else TASK_RISK_CLASS.get(task, HIGH),
+        "mission_status": selected.get("status") if selected else "mission_not_mapped",
+        "mission_completion_status": selected.get("completion_status") if selected else None,
+        "next_mission": goal.get("next_mission") or goal.get("next_recommended_mission"),
+        "linked_capability": selected.get("linked_capability") if selected else None,
+        "mission_priority_score": selected.get("priority_score") if selected else None,
     }
 
 
@@ -1178,6 +1227,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
     task = decision["selected_task"]
     classification = classify(task, observation, breach)
     capability_context = capability_context_for(task, decision)
+    mission_context = mission_context_for(task, decision)
     health_governor, health_governor_status = read_optional_json(HEALTH_GOVERNOR_JSON)
     health_governor_context = {
         "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
@@ -1206,6 +1256,11 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
                               f"({execution['status']})."),
         "why_this_task": decision["reason"],
         "priority_engine_status": decision.get("priority_model_status", "not_checked"),
+        "selected_mission": mission_context.get("selected_mission"),
+        "mission_reason": mission_context.get("mission_reason"),
+        "mission_risk": mission_context.get("mission_risk"),
+        "mission_status": mission_context.get("mission_status"),
+        "next_mission": mission_context.get("next_mission"),
         "selected_capability": capability_context.get("selected_capability"),
         "capability_health": capability_context.get("capability_health"),
         "capability_reason": capability_context.get("capability_reason"),
@@ -1247,6 +1302,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
             "diversity_status": (decision.get("priority_engine") or {}).get("diversity_status"),
             "cooldown_respected": (decision.get("priority_engine") or {}).get("cooldown_respected"),
         },
+        "goal_manager_integration": mission_context,
         "capability_registry_integration": capability_context,
         "capability_health_governor_integration": health_governor_context,
         "classification": classification,
@@ -1407,6 +1463,11 @@ def render_owner_summary_md(s: Dict[str, Any]) -> str:
              f"- What Sentinel did: {redact_text(s['what_sentinel_did'])}",
              f"- Why this task: {redact_text(s['why_this_task'])}",
              f"- Priority engine: {redact_text(s.get('priority_engine_status'))}",
+             f"- Selected mission: {redact_text(s.get('selected_mission'))}",
+             f"- Mission reason: {redact_text(s.get('mission_reason'))}",
+             f"- Mission risk: {redact_text(s.get('mission_risk'))}",
+             f"- Mission status: {redact_text(s.get('mission_status'))}",
+             f"- Next mission: {redact_text(s.get('next_mission'))}",
              f"- Selected capability: {redact_text(s.get('selected_capability'))}",
              f"- Capability health: {redact_text(s.get('capability_health'))}",
              f"- Capability risk: {redact_text(s.get('capability_risk'))}",

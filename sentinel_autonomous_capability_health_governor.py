@@ -225,6 +225,7 @@ WARNING_HISTORY_JSON = STATE_DIR / "autonomous_capability_warning_history.json"
 REPAIR_HISTORY_JSON = STATE_DIR / "autonomous_capability_repair_history.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomous_capability_repair_patterns.json"
 BLOCKED_REPAIR_PATTERNS_JSON = STATE_DIR / "autonomous_capability_blocked_repair_patterns.json"
+GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-capability-health-governor.jsonl"
 
@@ -351,6 +352,29 @@ def read_json(path: Path) -> Tuple[Optional[Any], str]:  # type: ignore[no-redef
         return None, "invalid_json"
     except OSError:
         return None, "read_error"
+
+
+def mission_state_summary() -> Dict[str, Any]:
+    goal = load_dict(GOAL_MANAGER_JSON)
+    missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
+    if not isinstance(missions, list):
+        missions = []
+    health_missions = [
+        mission for mission in missions
+        if isinstance(mission, dict) and mission.get("mission_type") == "maintain_capability_health"
+    ]
+    completed = goal.get("completed_missions") if isinstance(goal.get("completed_missions"), list) else []
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
+        "available": bool(goal),
+        "goal_manager_status": goal.get("status") if goal else "not_available",
+        "health_related_mission_count": len(health_missions),
+        "last_health_mission": health_missions[0].get("status") if health_missions else None,
+        "completed_health_repairs": sum(
+            1 for item in completed
+            if isinstance(item, dict) and item.get("mission_type") == "maintain_capability_health"
+        ),
+    }
 
 
 def file_age_hours(path: Path) -> Optional[float]:
@@ -1013,6 +1037,7 @@ def write_playbooks(report: Dict[str, Any]) -> None:
 
 
 def render_report_md(report: Dict[str, Any]) -> str:
+    mission = report.get("goal_manager_integration") if isinstance(report.get("goal_manager_integration"), dict) else {}
     return "\n".join([
         "# Sentinel Autonomous Capability Health Governor",
         "",
@@ -1024,6 +1049,7 @@ def render_report_md(report: Dict[str, Any]) -> str:
         f"- blocked_repairs: `{report.get('blocked_repair_count', 0)}`",
         f"- before_health: `{report.get('before_health')}`",
         f"- after_health: `{report.get('after_health', '-')}`",
+        f"- health_related_missions: `{mission.get('health_related_mission_count', 0)}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1111,6 +1137,7 @@ def render_learning_md(report: Dict[str, Any]) -> str:
 
 def render_owner_summary_md(report: Dict[str, Any]) -> str:
     repaired_caps = sorted(set(str(item.get("capability_id")) for item in report.get("executed_repairs") or [] if item.get("capability_id")))
+    mission = report.get("goal_manager_integration") if isinstance(report.get("goal_manager_integration"), dict) else {}
     return "\n".join([
         "# Capability Health Owner Summary",
         "",
@@ -1121,6 +1148,9 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- executed_safe_repairs: `{report.get('executed_repair_count', 0)}`",
         f"- blocked_repairs: `{report.get('blocked_repair_count', 0)}`",
         f"- repaired_capabilities: `{', '.join(repaired_caps) or '-'}`",
+        f"- health_related_mission_count: `{mission.get('health_related_mission_count', 0)}`",
+        f"- last_health_mission: `{mission.get('last_health_mission', '-')}`",
+        f"- completed_health_repairs: `{mission.get('completed_health_repairs', 0)}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1140,12 +1170,18 @@ def write_outputs(report: Dict[str, Any]) -> None:
         "timestamp_utc": report.get("timestamp_utc") or utc_now(),
         **report,
         **HARD_DEFAULTS,
+        "goal_manager_integration": mission_state_summary(),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
+            "playbooks/sentinel-autonomous-goal-manager.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue.playbook.json",
+            "playbooks/sentinel-autonomous-mission-routing.playbook.json",
+            "playbooks/sentinel-autonomous-mission-validation.playbook.json",
             "playbooks/sentinel-autonomous-capability-health-governor.playbook.json",
             "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
             "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",

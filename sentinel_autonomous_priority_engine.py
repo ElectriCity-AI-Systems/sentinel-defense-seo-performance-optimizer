@@ -195,6 +195,7 @@ LATEST_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_cy
 EXPORT_LATEST_DIR = PROJECT_DIR / "exports/payhip-upload-pack/latest"
 CAPABILITY_REGISTRY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_registry.json"
 HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
+GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.md"
@@ -469,6 +470,7 @@ def read_inputs() -> Dict[str, Any]:
         LATEST_RUNNER_JSON,
         CAPABILITY_REGISTRY_JSON,
         HEALTH_GOVERNOR_JSON,
+        GOAL_MANAGER_JSON,
     ]
     statuses: Dict[str, str] = {}
     missing: List[str] = []
@@ -484,6 +486,7 @@ def read_inputs() -> Dict[str, Any]:
     runner = load_dict(RUNNER_JSON) or load_dict(LATEST_RUNNER_JSON)
     capability_registry = load_dict(CAPABILITY_REGISTRY_JSON)
     health_governor = load_dict(HEALTH_GOVERNOR_JSON)
+    goal_manager = load_dict(GOAL_MANAGER_JSON)
     git_status = exact_git_command("status")
     git_log = exact_git_command("log")
     return {
@@ -494,6 +497,7 @@ def read_inputs() -> Dict[str, Any]:
         "runner": runner,
         "capability_registry": capability_registry,
         "health_governor": health_governor,
+        "goal_manager": goal_manager,
         "recent_tasks": collect_recent_tasks(),
         "critical_json": critical_json_scan(),
         "public_assets": public_assets_status(),
@@ -555,6 +559,52 @@ def health_governor_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "repaired_by_capability": repaired,
         "status": governor.get("status") or "available",
         "after_health": after_health,
+    }
+
+
+def mission_queue_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    goal = inputs.get("goal_manager")
+    if not isinstance(goal, dict):
+        return {
+            "status": "not_available",
+            "mission_count": 0,
+            "active_by_task": {},
+            "blocked_by_task": {},
+            "completed_by_task": {},
+            "business_by_task": {},
+            "selected_mission": None,
+        }
+    missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
+    if not isinstance(missions, list):
+        missions = []
+    active_by_task: Dict[str, Dict[str, Any]] = {}
+    blocked_by_task: Dict[str, Dict[str, Any]] = {}
+    completed_by_task: Dict[str, Dict[str, Any]] = {}
+    business_by_task: Dict[str, int] = {}
+    for mission in missions:
+        if not isinstance(mission, dict):
+            continue
+        tasks = mission.get("linked_tasks") if isinstance(mission.get("linked_tasks"), list) else []
+        for task in tasks:
+            task = str(task)
+            business_by_task[task] = max(business_by_task.get(task, 0), int(mission.get("business_value_score") or 0))
+            status = str(mission.get("status") or "")
+            completion = str(mission.get("completion_status") or "")
+            if status.startswith("BLOCKED") or status == "OWNER_REVIEW_REQUIRED":
+                blocked_by_task[task] = mission
+            elif completion in {"COMPLETED", "COMPLETE_FRESH"} or status == "COMPLETED":
+                completed_by_task[task] = mission
+            elif mission.get("can_execute_autonomously"):
+                active_by_task[task] = mission
+    selected = goal.get("selected_mission") if isinstance(goal.get("selected_mission"), dict) else None
+    return {
+        "status": goal.get("status") or "available",
+        "mission_count": int(goal.get("mission_queue_count") or len(missions)),
+        "active_by_task": active_by_task,
+        "blocked_by_task": blocked_by_task,
+        "completed_by_task": completed_by_task,
+        "business_by_task": business_by_task,
+        "selected_mission": selected,
     }
 
 
@@ -633,6 +683,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
     runner = inputs["runner"]
     capabilities = capability_index(inputs)
     health_governor = health_governor_index(inputs)
+    missions = mission_queue_index(inputs)
     breach = bool(kernel.get("breach") or runner.get("breach"))
     forbidden_stop = breach
     scores: List[Dict[str, Any]] = []
@@ -652,6 +703,10 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         cap_repairable_warnings = int((health_governor.get("repairable_by_capability") or {}).get(cap_id or "", 0))
         cap_blocked_warnings = int((health_governor.get("blocked_by_capability") or {}).get(cap_id or "", 0))
         cap_repaired = int((health_governor.get("repaired_by_capability") or {}).get(cap_id or "", 0))
+        active_mission = (missions.get("active_by_task") or {}).get(task)
+        blocked_mission = (missions.get("blocked_by_task") or {}).get(task)
+        completed_mission = (missions.get("completed_by_task") or {}).get(task)
+        mission_business_value = int((missions.get("business_by_task") or {}).get(task, 0))
         if cap_repaired:
             capability_usefulness += min(10, cap_repaired * 3)
         urgency = 0
@@ -710,6 +765,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         if task == "generate_next_safe_actions":
             urgency += 8
             reason_parts.append("fallback_safe_action_generation")
+        if active_mission:
+            urgency += min(35, int(active_mission.get("urgency_score") or 0) // 2 + 8)
+            reason_parts.append(f"active_mission:{active_mission.get('mission_type')}")
         if task == "repair_capability_health_warning" and health_governor.get("warning_count"):
             urgency += 50
             repair_value += min(50, 20 + int(health_governor.get("warning_count") or 0) * 8)
@@ -744,6 +802,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         if cap_blocked_warnings:
             blocked_penalty += min(40, cap_blocked_warnings * 10)
             reason_parts.append(f"capability_blocked_warnings_{cap_blocked_warnings}")
+        if blocked_mission:
+            blocked_penalty += 45
+            reason_parts.append(f"blocked_mission:{blocked_mission.get('mission_type')}")
         if task == "repair_invalid_json_output" and not broken_json:
             blocked_penalty += 90
             reason_parts.append("no_broken_json_to_repair")
@@ -774,6 +835,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             "missing_output_score": missing_score_for(task, outputs, inputs),
             "validation_failure_score": validation_failure,
             "business_value_score": BUSINESS_VALUE.get(task, 0),
+            "mission_business_value_score": min(25, mission_business_value // 2),
             "learning_value_score": LEARNING_VALUE.get(task, 5),
             "capability_usefulness_score": capability_usefulness,
             "capability_freshness_score": capability_freshness_gap,
@@ -789,6 +851,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             + components["missing_output_score"]
             + components["validation_failure_score"]
             + components["business_value_score"]
+            + components["mission_business_value_score"]
             + components["learning_value_score"]
             + components["capability_usefulness_score"]
             + components["capability_freshness_score"]
@@ -798,6 +861,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             - components["blocked_penalty"]
             - components["risk_penalty"]
         )
+        if completed_mission:
+            total -= 10
+            reason_parts.append(f"completed_mission:{completed_mission.get('mission_type')}")
         can_execute_now = (
             task in ALLOWED_TASKS
             and risk in AUTO_ALLOWED_RISK
@@ -819,6 +885,9 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             "capability_status": cap.get("health_status") if cap else "registry_missing_or_unmapped",
             "capability_can_run_autonomously": cap.get("can_run_autonomously") if cap else None,
             "health_governor_status": health_governor.get("status"),
+            "mission_manager_status": missions.get("status"),
+            "mission_type": active_mission.get("mission_type") if isinstance(active_mission, dict) else None,
+            "mission_status": active_mission.get("status") if isinstance(active_mission, dict) else None,
             "capability_repairable_warning_count": cap_repairable_warnings,
             "capability_blocked_warning_count": cap_blocked_warnings,
             "capability_successful_repair_count": cap_repaired,
@@ -858,6 +927,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
 def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
     registry = inputs.get("capability_registry")
     governor = health_governor_index(inputs)
+    missions = mission_queue_index(inputs)
     registry_status = "ok" if isinstance(registry, dict) and registry.get("capabilities") else "missing_or_invalid"
     return {
         "missing_inputs": inputs.get("missing_inputs", []),
@@ -868,6 +938,8 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "capability_count": len(registry.get("capabilities", [])) if isinstance(registry, dict) else 0,
         "health_governor_status": governor.get("status"),
         "health_governor_warning_count": governor.get("warning_count"),
+        "goal_manager_status": missions.get("status"),
+        "mission_count": missions.get("mission_count"),
         "git_status_count": len((inputs.get("git_status") or {}).get("lines") or []),
         "git_log_count": len((inputs.get("git_log") or {}).get("lines") or []),
     }
@@ -951,6 +1023,8 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
     selected_task = selected.get("task")
     selected_capability = selected.get("capability_id")
     selected_capability_status = selected.get("capability_status")
+    selected_mission = selected.get("mission_type")
+    selected_mission_status = selected.get("mission_status")
     model = {
         "schema_version": SCHEMA_VERSION,
         "phase": PHASE,
@@ -965,6 +1039,8 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "selected_capability": selected_capability,
         "selected_capability_status": selected_capability_status,
         "selected_capability_can_run_autonomously": selected.get("capability_can_run_autonomously"),
+        "selected_mission": selected_mission,
+        "selected_mission_status": selected_mission_status,
         "can_execute_now": bool(selected.get("can_execute_now")),
         "task_scores": scoring["scores"],
         "top_scores": scoring["top_scores"],
@@ -989,6 +1065,13 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "status": (scoring.get("inputs") or {}).get("health_governor_status"),
             "warning_count": (scoring.get("inputs") or {}).get("health_governor_warning_count"),
         },
+        "goal_manager_integration": {
+            "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
+            "status": (scoring.get("inputs") or {}).get("goal_manager_status"),
+            "mission_count": (scoring.get("inputs") or {}).get("mission_count"),
+            "selected_mission": selected_mission,
+            "selected_mission_status": selected_mission_status,
+        },
         "hard_defaults": HARD_DEFAULTS,
         "live_apply": False,
         "emergency_stop": True,
@@ -999,6 +1082,7 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "breach": bool(scoring.get("breach")),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_priority_engine.py",
+            "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
@@ -1006,6 +1090,10 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "playbooks/sentinel-autonomy-anti-loop-governor.playbook.json",
             "playbooks/sentinel-autonomy-task-diversity.playbook.json",
             "playbooks/sentinel-autonomy-priority-integration.playbook.json",
+            "playbooks/sentinel-autonomous-goal-manager.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue.playbook.json",
+            "playbooks/sentinel-autonomous-mission-routing.playbook.json",
+            "playbooks/sentinel-autonomous-mission-validation.playbook.json",
         ],
     }
     return model
@@ -1128,6 +1216,7 @@ def render_engine_md(model: Dict[str, Any]) -> str:
         f"- status: `{model.get('status')}`",
         f"- selected_task: `{model.get('selected_task')}`",
         f"- selected_capability: `{model.get('selected_capability')}`",
+        f"- selected_mission: `{model.get('selected_mission')}`",
         f"- selected_task_score: `{model.get('selected_task_score')}`",
         f"- risk_class: `{model.get('selected_task_risk_class')}`",
         f"- can_execute_now: `{model.get('can_execute_now')}`",
@@ -1148,6 +1237,7 @@ def render_scores_md(model: Dict[str, Any]) -> str:
             f"{index}. `{item.get('task')}` score=`{item.get('score')}` "
             f"risk=`{item.get('risk_class')}` executable=`{item.get('can_execute_now')}` "
             f"capability=`{item.get('capability_id')}` "
+            f"mission=`{item.get('mission_type') or '-'}` "
             f"reason={redact_text(item.get('reason'), 220)}"
         )
     return "\n".join(lines) + "\n"
