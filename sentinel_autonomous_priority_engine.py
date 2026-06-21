@@ -196,6 +196,8 @@ EXPORT_LATEST_DIR = PROJECT_DIR / "exports/payhip-upload-pack/latest"
 CAPABILITY_REGISTRY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_registry.json"
 HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
 GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
+MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_mission_queue_runner.json"
+MISSION_COMPLETION_LEDGER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_mission_completion_ledger.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.md"
@@ -471,6 +473,8 @@ def read_inputs() -> Dict[str, Any]:
         CAPABILITY_REGISTRY_JSON,
         HEALTH_GOVERNOR_JSON,
         GOAL_MANAGER_JSON,
+        MISSION_RUNNER_JSON,
+        MISSION_COMPLETION_LEDGER_JSON,
     ]
     statuses: Dict[str, str] = {}
     missing: List[str] = []
@@ -487,6 +491,8 @@ def read_inputs() -> Dict[str, Any]:
     capability_registry = load_dict(CAPABILITY_REGISTRY_JSON)
     health_governor = load_dict(HEALTH_GOVERNOR_JSON)
     goal_manager = load_dict(GOAL_MANAGER_JSON)
+    mission_runner = load_dict(MISSION_RUNNER_JSON)
+    mission_completion_ledger = load_dict(MISSION_COMPLETION_LEDGER_JSON)
     git_status = exact_git_command("status")
     git_log = exact_git_command("log")
     return {
@@ -498,6 +504,8 @@ def read_inputs() -> Dict[str, Any]:
         "capability_registry": capability_registry,
         "health_governor": health_governor,
         "goal_manager": goal_manager,
+        "mission_runner": mission_runner,
+        "mission_completion_ledger": mission_completion_ledger,
         "recent_tasks": collect_recent_tasks(),
         "critical_json": critical_json_scan(),
         "public_assets": public_assets_status(),
@@ -564,15 +572,38 @@ def health_governor_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
 
 def mission_queue_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
     goal = inputs.get("goal_manager")
+    ledger = inputs.get("mission_completion_ledger") if isinstance(inputs.get("mission_completion_ledger"), dict) else {}
+    entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
+    ledger_completed_by_task: Dict[str, Dict[str, Any]] = {}
+    ledger_blocked_by_task: Dict[str, Dict[str, Any]] = {}
+    for item in entries[-100:]:
+        if not isinstance(item, dict):
+            continue
+        task = str(item.get("linked_task") or "")
+        if not task:
+            continue
+        mission = {
+            "mission_type": item.get("mission_type"),
+            "status": item.get("completion_status"),
+            "completion_status": item.get("completion_status"),
+            "linked_tasks": [task],
+            "business_value_score": 0,
+        }
+        if item.get("completion_status") == "COMPLETED":
+            ledger_completed_by_task[task] = mission
+        elif item.get("blocked_reason"):
+            ledger_blocked_by_task[task] = mission
     if not isinstance(goal, dict):
         return {
             "status": "not_available",
             "mission_count": 0,
             "active_by_task": {},
-            "blocked_by_task": {},
-            "completed_by_task": {},
+            "blocked_by_task": ledger_blocked_by_task,
+            "completed_by_task": ledger_completed_by_task,
             "business_by_task": {},
             "selected_mission": None,
+            "runner_status": (inputs.get("mission_runner") or {}).get("status") if isinstance(inputs.get("mission_runner"), dict) else "not_available",
+            "ledger_completed_count": int(ledger.get("completed_count") or 0),
         }
     missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
     if not isinstance(missions, list):
@@ -597,6 +628,8 @@ def mission_queue_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
             elif mission.get("can_execute_autonomously"):
                 active_by_task[task] = mission
     selected = goal.get("selected_mission") if isinstance(goal.get("selected_mission"), dict) else None
+    blocked_by_task.update({task: mission for task, mission in ledger_blocked_by_task.items() if task not in blocked_by_task})
+    completed_by_task.update({task: mission for task, mission in ledger_completed_by_task.items() if task not in completed_by_task})
     return {
         "status": goal.get("status") or "available",
         "mission_count": int(goal.get("mission_queue_count") or len(missions)),
@@ -605,6 +638,8 @@ def mission_queue_index(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "completed_by_task": completed_by_task,
         "business_by_task": business_by_task,
         "selected_mission": selected,
+        "runner_status": (inputs.get("mission_runner") or {}).get("status") if isinstance(inputs.get("mission_runner"), dict) else "not_available",
+        "ledger_completed_count": int(ledger.get("completed_count") or 0),
     }
 
 
@@ -824,6 +859,8 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
         if forbidden_stop:
             blocked_penalty += 10000
             reason_parts.append("breach_or_forbidden_stop")
+        if completed_mission:
+            repetition += 18
 
         r_penalty = risk_penalty(task)
         if r_penalty:
@@ -862,7 +899,7 @@ def score_tasks(inputs: Optional[Dict[str, Any]] = None, recent_override: Option
             - components["risk_penalty"]
         )
         if completed_mission:
-            total -= 10
+            total -= 28
             reason_parts.append(f"completed_mission:{completed_mission.get('mission_type')}")
         can_execute_now = (
             task in ALLOWED_TASKS
@@ -940,6 +977,8 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "health_governor_warning_count": governor.get("warning_count"),
         "goal_manager_status": missions.get("status"),
         "mission_count": missions.get("mission_count"),
+        "mission_runner_status": missions.get("runner_status"),
+        "mission_completion_count": missions.get("ledger_completed_count"),
         "git_status_count": len((inputs.get("git_status") or {}).get("lines") or []),
         "git_log_count": len((inputs.get("git_log") or {}).get("lines") or []),
     }
@@ -1069,6 +1108,8 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
             "status": (scoring.get("inputs") or {}).get("goal_manager_status"),
             "mission_count": (scoring.get("inputs") or {}).get("mission_count"),
+            "mission_runner_status": (scoring.get("inputs") or {}).get("mission_runner_status"),
+            "mission_completion_count": (scoring.get("inputs") or {}).get("mission_completion_count"),
             "selected_mission": selected_mission,
             "selected_mission_status": selected_mission_status,
         },
@@ -1081,6 +1122,7 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "medium_executable": False,
         "breach": bool(scoring.get("breach")),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_priority_engine.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
@@ -1094,6 +1136,10 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "playbooks/sentinel-autonomous-mission-queue.playbook.json",
             "playbooks/sentinel-autonomous-mission-routing.playbook.json",
             "playbooks/sentinel-autonomous-mission-validation.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue-runner.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
+            "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
         ],
     }
     return model

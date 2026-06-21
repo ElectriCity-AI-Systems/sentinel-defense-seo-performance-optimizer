@@ -226,6 +226,8 @@ REPAIR_HISTORY_JSON = STATE_DIR / "autonomous_capability_repair_history.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomous_capability_repair_patterns.json"
 BLOCKED_REPAIR_PATTERNS_JSON = STATE_DIR / "autonomous_capability_blocked_repair_patterns.json"
 GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
+MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
+MISSION_COMPLETION_LEDGER_JSON = STATE_DIR / "autonomous_mission_completion_ledger.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-capability-health-governor.jsonl"
 
@@ -356,6 +358,9 @@ def read_json(path: Path) -> Tuple[Optional[Any], str]:  # type: ignore[no-redef
 
 def mission_state_summary() -> Dict[str, Any]:
     goal = load_dict(GOAL_MANAGER_JSON)
+    runner = load_dict(MISSION_RUNNER_JSON)
+    ledger = load_dict(MISSION_COMPLETION_LEDGER_JSON)
+    entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
     missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
     if not isinstance(missions, list):
         missions = []
@@ -364,16 +369,33 @@ def mission_state_summary() -> Dict[str, Any]:
         if isinstance(mission, dict) and mission.get("mission_type") == "maintain_capability_health"
     ]
     completed = goal.get("completed_missions") if isinstance(goal.get("completed_missions"), list) else []
+    completed_health_from_ledger = [
+        item for item in entries
+        if isinstance(item, dict)
+        and item.get("mission_type") == "maintain_capability_health"
+        and item.get("completion_status") == "COMPLETED"
+    ]
+    blocked_health_from_ledger = [
+        item for item in entries
+        if isinstance(item, dict)
+        and item.get("mission_type") == "maintain_capability_health"
+        and item.get("blocked_reason")
+    ]
     return {
         "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
         "available": bool(goal),
         "goal_manager_status": goal.get("status") if goal else "not_available",
+        "mission_runner_status": runner.get("status") if runner else "not_available",
+        "mission_runner_completed_count": int(runner.get("missions_completed") or 0) if runner else 0,
         "health_related_mission_count": len(health_missions),
         "last_health_mission": health_missions[0].get("status") if health_missions else None,
         "completed_health_repairs": sum(
             1 for item in completed
             if isinstance(item, dict) and item.get("mission_type") == "maintain_capability_health"
         ),
+        "completed_health_missions": len(completed_health_from_ledger),
+        "blocked_health_missions": len(blocked_health_from_ledger),
+        "last_health_mission_repair_result": completed_health_from_ledger[-1].get("validation_status") if completed_health_from_ledger else None,
     }
 
 
@@ -1050,6 +1072,8 @@ def render_report_md(report: Dict[str, Any]) -> str:
         f"- before_health: `{report.get('before_health')}`",
         f"- after_health: `{report.get('after_health', '-')}`",
         f"- health_related_missions: `{mission.get('health_related_mission_count', 0)}`",
+        f"- mission_runner_status: `{mission.get('mission_runner_status', '-')}`",
+        f"- completed_health_missions: `{mission.get('completed_health_missions', 0)}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1151,6 +1175,9 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- health_related_mission_count: `{mission.get('health_related_mission_count', 0)}`",
         f"- last_health_mission: `{mission.get('last_health_mission', '-')}`",
         f"- completed_health_repairs: `{mission.get('completed_health_repairs', 0)}`",
+        f"- completed_health_missions: `{mission.get('completed_health_missions', 0)}`",
+        f"- blocked_health_missions: `{mission.get('blocked_health_missions', 0)}`",
+        f"- mission_runner_status: `{mission.get('mission_runner_status', '-')}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1172,6 +1199,7 @@ def write_outputs(report: Dict[str, Any]) -> None:
         **HARD_DEFAULTS,
         "goal_manager_integration": mission_state_summary(),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_capability_registry.py",
@@ -1182,6 +1210,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-mission-queue.playbook.json",
             "playbooks/sentinel-autonomous-mission-routing.playbook.json",
             "playbooks/sentinel-autonomous-mission-validation.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue-runner.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
+            "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-capability-health-governor.playbook.json",
             "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
             "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",

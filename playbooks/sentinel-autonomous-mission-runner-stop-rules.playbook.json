@@ -1,0 +1,29 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "diversity_rules": [
+    "at least two different missions in three steps when safe alternatives exist",
+    "at least three different missions in five steps when safe alternatives exist"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-runner-stop-rules",
+  "phase": "10.6",
+  "schema_version": "sentinel-autonomous-mission-queue-runner-10.6",
+  "stop_rules": [
+    "STOP_ON_BREACH",
+    "STOP_ON_FORBIDDEN_PATTERN",
+    "STOP_ON_GOAL_MANAGER_FAILURE",
+    "STOP_ON_REPEATED_MISSION_LOOP",
+    "STOP_ON_NO_SAFE_MISSION",
+    "STOP_ON_MAX_MISSIONS",
+    "STOP_ON_LOCK_COLLISION",
+    "STOP_ON_INVALID_JSON",
+    "STOP_ON_UNSAFE_SCOPE",
+    "STOP_ON_LIVE_APPLY_ATTEMPT",
+    "STOP_ON_MISSION_VALIDATION_FAILURE"
+  ]
+}

@@ -27,6 +27,7 @@ KERNEL_LATEST_JSON = PROJECT_DIR / "state/adaptive-learning/latest_self_governin
 PRIORITY_MODEL_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_priority_model.json"
 HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
 GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
+MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_mission_queue_runner.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.md"
@@ -324,6 +325,21 @@ def goal_manager_summary() -> Dict[str, Any]:
         "selected_mission": data.get("selected_mission_type") if data else None,
         "mission_queue_count": int(data.get("mission_queue_count") or 0) if data else 0,
         "next_mission": data.get("next_mission") or data.get("next_recommended_mission") if data else None,
+    }
+
+
+def mission_queue_runner_summary() -> Dict[str, Any]:
+    data = load_dict(MISSION_RUNNER_JSON)
+    diversity = data.get("mission_diversity") if isinstance(data.get("mission_diversity"), dict) else {}
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_mission_queue_runner.json",
+        "available": bool(data),
+        "status": data.get("status") if data else "not_available",
+        "mission_queue_status": data.get("completion_ledger_status") if data else None,
+        "mission_completion_count": int(data.get("missions_completed") or 0) if data else 0,
+        "mission_diversity": diversity.get("status"),
+        "selected_missions": data.get("selected_missions") if isinstance(data.get("selected_missions"), list) else [],
+        "stop_reason": data.get("stop_reason") if data else None,
     }
 
 
@@ -720,6 +736,7 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
     report = base_report("run-once" if run_once else "run-cycles", status)
     governor_summary = health_governor_summary()
     goal_summary = goal_manager_summary()
+    mission_runner_summary = mission_queue_runner_summary()
     report.update({
         "requested_cycles": max_cycles,
         "cycles_completed": len(cycles),
@@ -737,6 +754,10 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
         "mission_completion_status": mission_diversity_stats(cycles).get("status"),
         "next_mission": goal_summary.get("next_mission"),
         "goal_manager": goal_summary,
+        "mission_queue_runner": mission_runner_summary,
+        "mission_queue_status": mission_runner_summary.get("mission_queue_status"),
+        "mission_completion_count": mission_runner_summary.get("mission_completion_count"),
+        "mission_queue_runner_status": mission_runner_summary.get("status"),
         "capability_health_before": governor_summary.get("capability_health_before"),
         "capability_health_after": governor_summary.get("capability_health_after"),
         "repairs_attempted": governor_summary.get("repairs_attempted"),
@@ -1092,6 +1113,9 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- mission_diversity: `{mission_diversity.get('status', '-')}`",
         f"- unique_mission_count: `{mission_diversity.get('unique_mission_count', '-')}`",
         f"- next_mission: `{report.get('next_mission', '-')}`",
+        f"- mission_queue_runner_status: `{report.get('mission_queue_runner_status', '-')}`",
+        f"- mission_queue_status: `{report.get('mission_queue_status', '-')}`",
+        f"- mission_completion_count: `{report.get('mission_completion_count', '-')}`",
         f"- capability_diversity: `{capability_diversity.get('status', '-')}`",
         f"- unique_capability_count: `{capability_diversity.get('unique_capability_count', '-')}`",
         f"- capability_health_before: `{report.get('capability_health_before', '-')}`",

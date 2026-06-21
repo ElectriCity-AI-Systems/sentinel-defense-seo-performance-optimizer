@@ -285,6 +285,8 @@ ROUTER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_skill_router_sta
 COOLDOWNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_capability_cooldowns.json"
 HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_capability_health_governor.json"
 GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
+MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_mission_queue_runner.json"
+MISSION_COMPLETION_LEDGER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_mission_completion_ledger.json"
 
 TASK_MEMORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_memory.json"
 SUCCESS_PATTERNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_success_patterns.json"
@@ -708,10 +710,15 @@ def health_governor_summary() -> Dict[str, Any]:
 
 def goal_manager_summary() -> Dict[str, Any]:
     goal = load_dict(GOAL_MANAGER_JSON)
+    runner = load_dict(MISSION_RUNNER_JSON)
+    ledger = load_dict(MISSION_COMPLETION_LEDGER_JSON)
+    entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
     missions = goal.get("mission_queue") or goal.get("classified_missions") or goal.get("routed_missions") or []
     if not isinstance(missions, list):
         missions = []
     by_capability: Dict[str, List[str]] = {}
+    completions_by_capability: Dict[str, int] = {}
+    failures_by_capability: Dict[str, int] = {}
     active: List[Dict[str, Any]] = []
     for mission in missions:
         if not isinstance(mission, dict):
@@ -721,10 +728,20 @@ def goal_manager_summary() -> Dict[str, Any]:
         by_capability.setdefault(cap, []).append(mission_type)
         if mission.get("completion_status") != "COMPLETE_FRESH" and mission.get("status") not in {"COMPLETED"}:
             active.append(mission)
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        cap = str(item.get("linked_capability") or "unmapped")
+        if item.get("completion_status") == "COMPLETED":
+            completions_by_capability[cap] = completions_by_capability.get(cap, 0) + 1
+        elif item.get("blocked_reason"):
+            failures_by_capability[cap] = failures_by_capability.get(cap, 0) + 1
     return {
         "state_path": "state/adaptive-learning/latest_autonomous_goal_manager.json",
         "available": bool(goal),
         "goal_manager_status": goal.get("status") if goal else "not_available",
+        "mission_runner_status": runner.get("status") if runner else "not_available",
+        "mission_completion_count": int(ledger.get("completed_count") or 0) if ledger else 0,
         "selected_mission": goal.get("selected_mission_type") if goal else None,
         "mission_count": len(missions),
         "active_mission_count": len(active),
@@ -732,6 +749,8 @@ def goal_manager_summary() -> Dict[str, Any]:
         "capability_mission_status": {
             cap: ",".join(sorted(set(items))) for cap, items in sorted(by_capability.items())
         },
+        "capability_mission_completions": completions_by_capability,
+        "capability_mission_failures": failures_by_capability,
     }
 
 
@@ -750,6 +769,7 @@ def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY"
         "recommended_capability": router.get("selected_capability"),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_capability_health_governor.py",
+            "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
@@ -763,6 +783,10 @@ def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY"
             "playbooks/sentinel-autonomous-mission-queue.playbook.json",
             "playbooks/sentinel-autonomous-mission-routing.playbook.json",
             "playbooks/sentinel-autonomous-mission-validation.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue-runner.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
+            "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-capability-registry.playbook.json",
             "playbooks/sentinel-autonomous-skill-router.playbook.json",
             "playbooks/sentinel-autonomous-capability-health.playbook.json",
@@ -836,6 +860,8 @@ def render_registry_md(registry: Dict[str, Any]) -> str:
         f"- recommended_capability: `{registry.get('recommended_capability')}`",
         f"- health_governor_status: `{governor.get('last_status', 'not_available')}`",
         f"- goal_manager_status: `{goals.get('goal_manager_status', 'not_available')}`",
+        f"- mission_runner_status: `{goals.get('mission_runner_status', 'not_available')}`",
+        f"- mission_completion_count: `{goals.get('mission_completion_count', 0)}`",
         f"- active_mission_count: `{goals.get('active_mission_count', 0)}`",
         f"- mission_linked_capabilities: `{', '.join(goals.get('mission_linked_capabilities') or []) or '-'}`",
         f"- repaired_warning_count: `{governor.get('repaired_warning_count', 0)}`",
@@ -928,6 +954,8 @@ def render_owner_summary_md(registry: Dict[str, Any]) -> str:
         f"- blocked_repair_count: `{governor.get('blocked_repair_count', 0)}`",
         f"- after_health_status: `{governor.get('after_health_status', '-')}`",
         f"- goal_manager_status: `{goals.get('goal_manager_status', 'not_available')}`",
+        f"- mission_runner_status: `{goals.get('mission_runner_status', 'not_available')}`",
+        f"- mission_completion_count: `{goals.get('mission_completion_count', 0)}`",
         f"- selected_mission: `{goals.get('selected_mission', '-')}`",
         f"- active_mission_count: `{goals.get('active_mission_count', 0)}`",
         f"- routed_next_skill: `{router.get('selected_capability')}`",

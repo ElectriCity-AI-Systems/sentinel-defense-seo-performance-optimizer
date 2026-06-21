@@ -1,0 +1,74 @@
+{
+  "allowed_apply_now": false,
+  "allowed_goal_manager_commands": [
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--build-mission-queue"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--classify-missions"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--cycle"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--discover-goals"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--execute-safe-mission-step"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--learn"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--route-missions"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--self-test"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--status"
+    ],
+    [
+      "python3",
+      "sentinel_autonomous_goal_manager.py",
+      "--validate-missions"
+    ]
+  ],
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "external_api",
+    "timer_install",
+    "HIGH_MEDIUM_LOW_LIVE_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "max_missions": 5,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-queue-runner",
+  "phase": "10.6",
+  "purpose": "Run several safe local Goal Manager mission steps with validation and stop rules.",
+  "schema_version": "sentinel-autonomous-mission-queue-runner-10.6"
+}

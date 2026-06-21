@@ -1,0 +1,32 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "entry_fields": [
+    "mission_id",
+    "mission_type",
+    "selected_at",
+    "executed_at",
+    "completed_at",
+    "status_before",
+    "status_after",
+    "linked_capability",
+    "linked_task",
+    "execution_status",
+    "validation_status",
+    "learning_status",
+    "completion_status",
+    "outputs_created",
+    "useful_outputs",
+    "blocked_reason",
+    "next_recommended_mission"
+  ],
+  "high_blocked": true,
+  "ledger_path": "state/adaptive-learning/autonomous_mission_completion_ledger.json",
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-completion-ledger",
+  "phase": "10.6",
+  "schema_version": "sentinel-autonomous-mission-queue-runner-10.6"
+}

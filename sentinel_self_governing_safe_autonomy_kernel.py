@@ -231,6 +231,7 @@ PRIORITY_MODEL_JSON = STATE_DIR / "autonomy_task_priority_model.json"
 CAPABILITY_REGISTRY_JSON = STATE_DIR / "autonomous_capability_registry.json"
 HEALTH_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_capability_health_governor.json"
 GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
+MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
 SUCCESS_PATTERNS_JSON = STATE_DIR / "autonomy_success_patterns.json"
 BLOCKED_PATTERNS_JSON = STATE_DIR / "autonomy_blocked_patterns.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomy_repair_patterns.json"
@@ -279,6 +280,7 @@ FORBIDDEN_INSTALL_PATH_TOKENS = (
 )
 RECOMMENDED_GIT_CHECKPOINT = [
     "sentinel_self_governing_safe_autonomy_kernel.py",
+    "sentinel_autonomous_mission_queue_runner.py",
     "sentinel_autonomous_capability_health_governor.py",
     "playbooks/sentinel-self-governing-autonomy-kernel.playbook.json",
     "playbooks/sentinel-autonomy-cycle.playbook.json",
@@ -288,6 +290,10 @@ RECOMMENDED_GIT_CHECKPOINT = [
     "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
     "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",
     "playbooks/sentinel-autonomous-capability-repair-validation.playbook.json",
+    "playbooks/sentinel-autonomous-mission-queue-runner.playbook.json",
+    "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
+    "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
+    "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
 ]
 
 # ---------------------------------------------------------------------------
@@ -906,6 +912,21 @@ def mission_context_for(task: str, decision: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def mission_runner_context() -> Dict[str, Any]:
+    runner, status = read_optional_json(MISSION_RUNNER_JSON)
+    runner = runner if status == "ok" and isinstance(runner, dict) else {}
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_mission_queue_runner.json",
+        "available": bool(runner),
+        "mission_runner_status": runner.get("status") if runner else "not_available",
+        "completed_mission_count": int(runner.get("missions_completed") or 0) if runner else 0,
+        "selected_missions": runner.get("selected_missions") if isinstance(runner.get("selected_missions"), list) else [],
+        "next_mission": runner.get("next_recommended_mission") if runner else None,
+        "stop_reason": runner.get("stop_reason") if runner else None,
+        "mission_diversity": (runner.get("mission_diversity") or {}).get("status") if isinstance(runner.get("mission_diversity"), dict) else None,
+    }
+
+
 def decide(observation: Dict[str, Any], breach: bool) -> Dict[str, Any]:
     if breach:
         return {"selected_task": "halt_and_report", "reason": "breach detected",
@@ -1228,6 +1249,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
     classification = classify(task, observation, breach)
     capability_context = capability_context_for(task, decision)
     mission_context = mission_context_for(task, decision)
+    mission_runner = mission_runner_context()
     health_governor, health_governor_status = read_optional_json(HEALTH_GOVERNOR_JSON)
     health_governor_context = {
         "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
@@ -1261,6 +1283,9 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
         "mission_risk": mission_context.get("mission_risk"),
         "mission_status": mission_context.get("mission_status"),
         "next_mission": mission_context.get("next_mission"),
+        "mission_runner_status": mission_runner.get("mission_runner_status"),
+        "mission_runner_completed_count": mission_runner.get("completed_mission_count"),
+        "mission_runner_stop_reason": mission_runner.get("stop_reason"),
         "selected_capability": capability_context.get("selected_capability"),
         "capability_health": capability_context.get("capability_health"),
         "capability_reason": capability_context.get("capability_reason"),
@@ -1303,6 +1328,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
             "cooldown_respected": (decision.get("priority_engine") or {}).get("cooldown_respected"),
         },
         "goal_manager_integration": mission_context,
+        "mission_runner_integration": mission_runner,
         "capability_registry_integration": capability_context,
         "capability_health_governor_integration": health_governor_context,
         "classification": classification,
@@ -1468,6 +1494,9 @@ def render_owner_summary_md(s: Dict[str, Any]) -> str:
              f"- Mission risk: {redact_text(s.get('mission_risk'))}",
              f"- Mission status: {redact_text(s.get('mission_status'))}",
              f"- Next mission: {redact_text(s.get('next_mission'))}",
+             f"- Mission runner status: {redact_text(s.get('mission_runner_status'))}",
+             f"- Mission runner completed count: {redact_text(s.get('mission_runner_completed_count'))}",
+             f"- Mission runner stop reason: {redact_text(s.get('mission_runner_stop_reason'))}",
              f"- Selected capability: {redact_text(s.get('selected_capability'))}",
              f"- Capability health: {redact_text(s.get('capability_health'))}",
              f"- Capability risk: {redact_text(s.get('capability_risk'))}",

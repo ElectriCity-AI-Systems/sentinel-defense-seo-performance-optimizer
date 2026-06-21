@@ -106,6 +106,7 @@ MISSION_HISTORY_JSON = STATE_DIR / "autonomous_mission_history.json"
 MISSION_PATTERNS_JSON = STATE_DIR / "autonomous_mission_patterns.json"
 BLOCKED_MISSION_PATTERNS_JSON = STATE_DIR / "autonomous_blocked_mission_patterns.json"
 MISSION_LEDGER_JSON = STATE_DIR / "autonomous_mission_completion_ledger.json"
+MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-goal-manager.jsonl"
 
@@ -468,6 +469,8 @@ def read_inputs() -> Dict[str, Any]:
         LATEST_HEALTH_GOVERNOR_JSON,
         PRIORITY_MODEL_JSON,
         CYCLE_RUNNER_HISTORY_JSON,
+        MISSION_LEDGER_JSON,
+        MISSION_RUNNER_JSON,
         HEALTH_GOVERNOR_REPORT_JSON,
         REGISTRY_REPORT_JSON,
         PRIORITY_JSON,
@@ -489,12 +492,79 @@ def read_inputs() -> Dict[str, Any]:
         "health_governor": load_dict(LATEST_HEALTH_GOVERNOR_JSON) or load_dict(HEALTH_GOVERNOR_JSON) or load_dict(HEALTH_GOVERNOR_REPORT_JSON),
         "priority": load_dict(PRIORITY_MODEL_JSON) or load_dict(PRIORITY_JSON),
         "runner": load_dict(RUNNER_JSON),
+        "mission_runner": load_dict(MISSION_RUNNER_JSON),
+        "mission_ledger": load_dict(MISSION_LEDGER_JSON),
         "kernel": load_dict(KERNEL_JSON),
     }
 
 
 def mission_id(mission_type: str) -> str:
     return f"MISSION-{mission_type.upper().replace('-', '_')}"
+
+
+def normalize_completion_ledger(raw: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        raw = {}
+    entries = raw.get("entries") if isinstance(raw.get("entries"), list) else []
+    by_mission = raw.get("by_mission") if isinstance(raw.get("by_mission"), dict) else {}
+    for key, value in raw.items():
+        if key in {"schema_version", "updated_at", "entries", "by_mission", "completed_count", "live_apply", "emergency_stop", "allowed_apply_now", "high_blocked", "low_live_executable", "medium_executable", "breach"}:
+            continue
+        if isinstance(value, dict) and key in MISSION_TYPES:
+            by_mission.setdefault(key, value)
+            if not any(isinstance(item, dict) and item.get("mission_type") == key for item in entries):
+                entries.append({
+                    "mission_id": mission_id(key),
+                    "mission_type": key,
+                    "completed_at": value.get("last_completed_at"),
+                    "completion_status": value.get("status", "COMPLETED"),
+                    "validation_status": value.get("last_validation_status", "MISSION_VALIDATION_OK"),
+                    "linked_capability": MISSION_ROUTING.get(key, ["unknown", "unknown"])[0],
+                    "linked_task": MISSION_ROUTING.get(key, ["unknown", "unknown"])[1],
+                })
+    return {
+        "schema_version": raw.get("schema_version", "sentinel-autonomous-mission-ledger-10.6"),
+        "updated_at": raw.get("updated_at"),
+        "entries": entries[-500:],
+        "by_mission": by_mission,
+        "completed_count": int(raw.get("completed_count") or len(entries)),
+        **HARD_DEFAULTS,
+    }
+
+
+def mission_ledger_summary(inputs: Dict[str, Any], mission_type: str) -> Dict[str, Any]:
+    ledger = normalize_completion_ledger(inputs.get("mission_ledger") if isinstance(inputs.get("mission_ledger"), dict) else {})
+    by_mission = ledger.get("by_mission") if isinstance(ledger.get("by_mission"), dict) else {}
+    info = by_mission.get(mission_type) if isinstance(by_mission.get(mission_type), dict) else {}
+    completed_at = info.get("last_completed_at") or info.get("completed_at")
+    age_hours = None
+    if completed_at:
+        try:
+            dt = datetime.fromisoformat(str(completed_at).replace("Z", "+00:00"))
+            age_hours = max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 3600.0)
+        except ValueError:
+            age_hours = None
+    return {
+        "completed": bool(info),
+        "last_completed_at": completed_at,
+        "completion_status": info.get("status") or info.get("completion_status"),
+        "validation_status": info.get("last_validation_status") or info.get("validation_status"),
+        "age_hours": round(age_hours, 3) if age_hours is not None else None,
+        "fresh_from_runner": bool(info) and (age_hours is None or age_hours < MAX_AGE_HOURS),
+    }
+
+
+def mission_runner_summary() -> Dict[str, Any]:
+    runner = load_dict(MISSION_RUNNER_JSON)
+    ledger = normalize_completion_ledger(load_dict(MISSION_LEDGER_JSON))
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_mission_queue_runner.json",
+        "available": bool(runner),
+        "last_mission_runner_status": runner.get("status") if runner else "not_available",
+        "completed_mission_count": int(ledger.get("completed_count") or 0),
+        "stop_reason": runner.get("stop_reason") if runner else None,
+        "next_recommended_mission": runner.get("next_recommended_mission") if runner else None,
+    }
 
 
 def mission_scope(risk: str) -> List[str]:
@@ -524,10 +594,12 @@ def mission_base(mission_type: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     priority = inputs.get("priority") if isinstance(inputs.get("priority"), dict) else {}
     runner = inputs.get("runner") if isinstance(inputs.get("runner"), dict) else {}
     kernel = inputs.get("kernel") if isinstance(inputs.get("kernel"), dict) else {}
+    ledger_info = mission_ledger_summary(inputs, mission_type)
 
     missing_output_score = min(60, len(status["missing"]) * 18 + len(status["invalid_json"]) * 30)
     warning_score = 0
     repair_score = 0
+    repetition_penalty = 0
     trigger = "scheduled_safe_autonomy"
     if mission_type == "maintain_capability_health":
         warning_count = int(health.get("warning_count") or 0)
@@ -550,6 +622,9 @@ def mission_base(mission_type: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         if git_info.get("recommended"):
             warning_score += 20
             trigger = "git_changes_present"
+    if ledger_info.get("fresh_from_runner"):
+        repetition_penalty = 42
+        trigger = "recently_completed_mission"
 
     freshness = 100
     if status["missing"]:
@@ -587,6 +662,7 @@ def mission_base(mission_type: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         + warning_score
         + repair_score
         + max(0, 100 - freshness)
+        - repetition_penalty
         - blocked_penalty
     )
     can_execute = (
@@ -602,6 +678,8 @@ def mission_base(mission_type: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         reason_if_blocked = "monitor-only mission writes reports but does not execute changes"
     if completion == "COMPLETE_FRESH" and mission_type not in {"maintain_priority_model", "generate_git_checkpoint_suggestion", "generate_next_safe_actions"}:
         priority_score -= 15
+    if ledger_info.get("fresh_from_runner") and mission_type not in {"repair_invalid_json_output", "repair_missing_public_asset"}:
+        priority_score -= 25
 
     return {
         "mission_id": mission_id(mission_type),
@@ -619,7 +697,7 @@ def mission_base(mission_type: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         "warning_score": warning_score,
         "repair_score": repair_score,
         "blocked_penalty": blocked_penalty,
-        "repetition_penalty": 0,
+        "repetition_penalty": repetition_penalty,
         "risk_penalty": 0 if risk in AUTO_ALLOWED_RISK else 1000,
         "risk_class": risk,
         "allowed_scope": mission_scope(risk),
@@ -647,6 +725,7 @@ def mission_base(mission_type: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
         "validation_status": "not_validated",
         "next_step": "execute_safe_local_step" if can_execute else "monitor_or_owner_review",
         "output_status": status,
+        "completion_ledger": ledger_info,
     }
 
 
@@ -853,13 +932,35 @@ def learn(validated: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     history = load_list(MISSION_HISTORY_JSON)
     patterns = load_dict(MISSION_PATTERNS_JSON)
     blocked = load_dict(BLOCKED_MISSION_PATTERNS_JSON)
-    ledger = load_dict(MISSION_LEDGER_JSON)
+    ledger = normalize_completion_ledger(load_dict(MISSION_LEDGER_JSON))
+    ledger_entries = ledger.get("entries") if isinstance(ledger.get("entries"), list) else []
+    ledger_by_mission = ledger.get("by_mission") if isinstance(ledger.get("by_mission"), dict) else {}
     now = utc_now()
     if selected:
         success = validated.get("mission_validation_status") == "MISSION_VALIDATION_OK"
+        key = str(selected.get("mission_type"))
+        ledger_entry = {
+            "mission_id": selected.get("mission_id") or mission_id(key),
+            "mission_type": key,
+            "selected_at": selected.get("selected_at"),
+            "executed_at": now,
+            "completed_at": now if success else None,
+            "status_before": selected.get("status"),
+            "status_after": "COMPLETED" if success else selected.get("status"),
+            "linked_capability": selected.get("linked_capability"),
+            "linked_task": (selected.get("linked_tasks") or [None])[0],
+            "execution_status": (validated.get("execution") or {}).get("status") if isinstance(validated.get("execution"), dict) else None,
+            "validation_status": validated.get("mission_validation_status"),
+            "learning_status": "MISSION_LEARNING_WRITTEN",
+            "completion_status": "COMPLETED" if success else selected.get("completion_status"),
+            "outputs_created": selected.get("expected_outputs"),
+            "useful_outputs": selected.get("expected_outputs") if success else [],
+            "blocked_reason": selected.get("reason_if_blocked"),
+            "next_recommended_mission": validated.get("next_mission"),
+        }
         history.append({
             "timestamp_utc": now,
-            "mission_type": selected.get("mission_type"),
+            "mission_type": key,
             "linked_capability": selected.get("linked_capability"),
             "linked_task": (selected.get("linked_tasks") or [None])[0],
             "mission_success": success,
@@ -867,13 +968,36 @@ def learn(validated: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             "blocked_reason": selected.get("reason_if_blocked"),
             "useful_outputs": selected.get("expected_outputs"),
         })
-        key = str(selected.get("mission_type"))
         if success:
             patterns[key] = int(patterns.get(key, 0)) + 1
-            ledger[key] = {"last_completed_at": now, "status": "COMPLETED"}
+            ledger_entries.append(ledger_entry)
+            ledger_by_mission[key] = {
+                "last_completed_at": now,
+                "status": "COMPLETED",
+                "last_validation_status": validated.get("mission_validation_status"),
+                "linked_capability": selected.get("linked_capability"),
+                "linked_task": (selected.get("linked_tasks") or [None])[0],
+            }
         else:
             reason = str(selected.get("reason_if_blocked") or validated.get("status") or "unknown")
             blocked[reason] = int(blocked.get(reason, 0)) + 1
+            ledger_entries.append(ledger_entry)
+            ledger_by_mission[key] = {
+                "last_completed_at": ledger_by_mission.get(key, {}).get("last_completed_at") if isinstance(ledger_by_mission.get(key), dict) else None,
+                "status": "FAILED_SAFE",
+                "last_validation_status": validated.get("mission_validation_status"),
+                "blocked_reason": reason,
+                "linked_capability": selected.get("linked_capability"),
+                "linked_task": (selected.get("linked_tasks") or [None])[0],
+            }
+    ledger = {
+        "schema_version": "sentinel-autonomous-mission-ledger-10.6",
+        "updated_at": now,
+        "entries": ledger_entries[-500:],
+        "by_mission": ledger_by_mission,
+        "completed_count": sum(1 for item in ledger_entries if isinstance(item, dict) and item.get("completion_status") == "COMPLETED"),
+        **HARD_DEFAULTS,
+    }
     write_json(MISSION_HISTORY_JSON, history[-300:])
     write_json(MISSION_PATTERNS_JSON, patterns)
     write_json(BLOCKED_MISSION_PATTERNS_JSON, blocked)
@@ -885,7 +1009,7 @@ def learn(validated: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "learning_updates": {
             "mission_patterns": patterns,
             "blocked_mission_patterns": blocked,
-            "completion_ledger_count": len(ledger),
+            "completion_ledger_count": int(ledger.get("completed_count") or 0),
         },
         "next_recommended_mission": validated.get("next_mission"),
         "not_stored": ["passwords", "tokens", "API keys", "private keys", "real customer data", "customer access data", "payment data"],
@@ -936,6 +1060,7 @@ def write_playbooks(report: Dict[str, Any]) -> None:
 
 
 def render_report_md(report: Dict[str, Any]) -> str:
+    runner = report.get("mission_queue_runner") if isinstance(report.get("mission_queue_runner"), dict) else {}
     return "\n".join([
         "# Sentinel Autonomous Goal Manager",
         "",
@@ -947,6 +1072,8 @@ def render_report_md(report: Dict[str, Any]) -> str:
         f"- selected_capability: `{report.get('selected_capability')}`",
         f"- selected_task: `{report.get('selected_task')}`",
         f"- validation: `{report.get('mission_validation_status', '-')}`",
+        f"- mission_runner_status: `{runner.get('last_mission_runner_status', '-')}`",
+        f"- mission_runner_completed_count: `{runner.get('completed_mission_count', 0)}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1014,6 +1141,7 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
     selected = report.get("selected_mission") if isinstance(report.get("selected_mission"), dict) else {}
     completed = report.get("completed_missions") if isinstance(report.get("completed_missions"), list) else []
     blocked = report.get("blocked_missions") if isinstance(report.get("blocked_missions"), list) else []
+    runner = report.get("mission_queue_runner") if isinstance(report.get("mission_queue_runner"), dict) else {}
     return "\n".join([
         "# Sentinel Autonomous Mission Owner Summary",
         "",
@@ -1024,6 +1152,9 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- mission_risk: `{selected.get('risk_class', '-')}`",
         f"- completed_missions: `{len(completed)}`",
         f"- blocked_missions: `{len(blocked)}`",
+        f"- mission_runner_status: `{runner.get('last_mission_runner_status', '-')}`",
+        f"- mission_runner_completed_count: `{runner.get('completed_mission_count', 0)}`",
+        f"- mission_runner_stop_reason: `{runner.get('stop_reason', '-')}`",
         f"- next_mission: `{report.get('next_mission', report.get('next_recommended_mission'))}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
@@ -1052,7 +1183,9 @@ def write_outputs(report: Dict[str, Any]) -> None:
         "timestamp_utc": report.get("timestamp_utc") or utc_now(),
         **report,
         **HARD_DEFAULTS,
+        "mission_queue_runner": mission_runner_summary(),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_capability_registry.py",
@@ -1063,6 +1196,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-mission-queue.playbook.json",
             "playbooks/sentinel-autonomous-mission-routing.playbook.json",
             "playbooks/sentinel-autonomous-mission-validation.playbook.json",
+            "playbooks/sentinel-autonomous-mission-queue-runner.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
+            "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
+            "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
         ],
     }
     write_json(REPORT_JSON, safe_report)

@@ -1,0 +1,25 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-mission-runner-owner-summary",
+  "owner_summary_fields": [
+    "missions_completed",
+    "selected_missions",
+    "selected_capabilities",
+    "selected_tasks",
+    "validated_outputs",
+    "completed_missions",
+    "learning_updates",
+    "stop_reason",
+    "next_recommended_mission",
+    "blocked_capabilities",
+    "safe_defaults"
+  ],
+  "phase": "10.6",
+  "schema_version": "sentinel-autonomous-mission-queue-runner-10.6"
+}
