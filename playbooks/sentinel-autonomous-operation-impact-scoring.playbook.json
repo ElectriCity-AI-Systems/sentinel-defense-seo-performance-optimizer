@@ -1,0 +1,19 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "impact_signals": [
+    "completion ledger extended",
+    "mission completions increased",
+    "health warnings reduced",
+    "registry or priority model refreshed",
+    "validation or owner briefing updated"
+  ],
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-operation-impact-scoring",
+  "phase": "10.8",
+  "schema_version": "sentinel-autonomous-operation-governor-10.8"
+}

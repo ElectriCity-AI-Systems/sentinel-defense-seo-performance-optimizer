@@ -287,6 +287,8 @@ HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_
 GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
 MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_mission_queue_runner.json"
 MISSION_COMPLETION_LEDGER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_mission_completion_ledger.json"
+SUPERVISOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operations_supervisor.json"
+OPERATION_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operation_governor.json"
 
 TASK_MEMORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_memory.json"
 SUCCESS_PATTERNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_success_patterns.json"
@@ -754,25 +756,62 @@ def goal_manager_summary() -> Dict[str, Any]:
     }
 
 
+def supervisor_summary() -> Dict[str, Any]:
+    supervisor = load_dict(SUPERVISOR_JSON)
+    operation_results = supervisor.get("operation_results") if isinstance(supervisor.get("operation_results"), list) else []
+    modules = []
+    for item in operation_results:
+        execution = item.get("execution") if isinstance(item, dict) and isinstance(item.get("execution"), dict) else item
+        result = execution.get("module_result") if isinstance(execution, dict) and isinstance(execution.get("module_result"), dict) else {}
+        module = result.get("module")
+        if module:
+            modules.append(str(module))
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operations_supervisor.json",
+        "available": bool(supervisor),
+        "supervisor_status": supervisor.get("status") if supervisor else "not_available",
+        "last_operation": supervisor.get("selected_operation") if supervisor else None,
+        "operations_completed": int(supervisor.get("operations_completed") or 0) if supervisor else 0,
+        "modules_used": sorted(set(modules)),
+    }
+
+
+def operation_governor_summary() -> Dict[str, Any]:
+    governor = load_dict(OPERATION_GOVERNOR_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operation_governor.json",
+        "available": bool(governor),
+        "status": governor.get("status") if governor else "not_available",
+        "selected_operation": governor.get("selected_operation_name") if governor else None,
+        "top_operation": (governor.get("top_scores") or [{}])[0].get("operation_name") if governor else None,
+    }
+
+
 def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY") -> Dict[str, Any]:
     registry = discover_capabilities()
     router = route_next_skill(registry)
     health = health_summary(registry)
     governor = health_governor_summary()
     goals = goal_manager_summary()
+    supervisor = supervisor_summary()
     registry.update({
         "status": status,
         "health": health,
         "health_governor": governor,
         "goal_manager": goals,
+        "operations_supervisor": supervisor,
+        "operation_governor": operation_governor_summary(),
         "router": router,
         "recommended_capability": router.get("selected_capability"),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_capability_health_governor.py",
+            "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
+            "sentinel_autonomous_operation_governor.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
             "playbooks/sentinel-autonomous-capability-health-governor.playbook.json",
@@ -787,6 +826,14 @@ def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY"
             "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
             "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
             "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
+            "playbooks/sentinel-autonomous-operations-supervisor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-decision.playbook.json",
+            "playbooks/sentinel-autonomous-system-validation.playbook.json",
+            "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-operation-governor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
+            "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
+            "playbooks/sentinel-autonomous-operation-diversity.playbook.json",
             "playbooks/sentinel-autonomous-capability-registry.playbook.json",
             "playbooks/sentinel-autonomous-skill-router.playbook.json",
             "playbooks/sentinel-autonomous-capability-health.playbook.json",
@@ -850,6 +897,7 @@ def capability_cooldowns(registry: Dict[str, Any]) -> Dict[str, Any]:
 def render_registry_md(registry: Dict[str, Any]) -> str:
     governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
     goals = registry.get("goal_manager") if isinstance(registry.get("goal_manager"), dict) else {}
+    supervisor = registry.get("operations_supervisor") if isinstance(registry.get("operations_supervisor"), dict) else {}
     lines = [
         "# Sentinel Autonomous Capability Registry",
         "",
@@ -862,6 +910,8 @@ def render_registry_md(registry: Dict[str, Any]) -> str:
         f"- goal_manager_status: `{goals.get('goal_manager_status', 'not_available')}`",
         f"- mission_runner_status: `{goals.get('mission_runner_status', 'not_available')}`",
         f"- mission_completion_count: `{goals.get('mission_completion_count', 0)}`",
+        f"- supervisor_status: `{supervisor.get('supervisor_status', 'not_available')}`",
+        f"- last_operation: `{supervisor.get('last_operation', '-')}`",
         f"- active_mission_count: `{goals.get('active_mission_count', 0)}`",
         f"- mission_linked_capabilities: `{', '.join(goals.get('mission_linked_capabilities') or []) or '-'}`",
         f"- repaired_warning_count: `{governor.get('repaired_warning_count', 0)}`",
@@ -943,6 +993,7 @@ def render_owner_summary_md(registry: Dict[str, Any]) -> str:
     router = registry.get("router", {})
     governor = registry.get("health_governor") if isinstance(registry.get("health_governor"), dict) else {}
     goals = registry.get("goal_manager") if isinstance(registry.get("goal_manager"), dict) else {}
+    supervisor = registry.get("operations_supervisor") if isinstance(registry.get("operations_supervisor"), dict) else {}
     return "\n".join([
         "# Sentinel Skill Router Owner Summary",
         "",
@@ -955,6 +1006,8 @@ def render_owner_summary_md(registry: Dict[str, Any]) -> str:
         f"- after_health_status: `{governor.get('after_health_status', '-')}`",
         f"- goal_manager_status: `{goals.get('goal_manager_status', 'not_available')}`",
         f"- mission_runner_status: `{goals.get('mission_runner_status', 'not_available')}`",
+        f"- supervisor_status: `{supervisor.get('supervisor_status', 'not_available')}`",
+        f"- last_operation: `{supervisor.get('last_operation', '-')}`",
         f"- mission_completion_count: `{goals.get('mission_completion_count', 0)}`",
         f"- selected_mission: `{goals.get('selected_mission', '-')}`",
         f"- active_mission_count: `{goals.get('active_mission_count', 0)}`",

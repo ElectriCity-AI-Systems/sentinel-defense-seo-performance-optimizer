@@ -232,6 +232,8 @@ CAPABILITY_REGISTRY_JSON = STATE_DIR / "autonomous_capability_registry.json"
 HEALTH_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_capability_health_governor.json"
 GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
 MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
+SUPERVISOR_JSON = STATE_DIR / "latest_autonomous_operations_supervisor.json"
+OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
 SUCCESS_PATTERNS_JSON = STATE_DIR / "autonomy_success_patterns.json"
 BLOCKED_PATTERNS_JSON = STATE_DIR / "autonomy_blocked_patterns.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomy_repair_patterns.json"
@@ -280,6 +282,9 @@ FORBIDDEN_INSTALL_PATH_TOKENS = (
 )
 RECOMMENDED_GIT_CHECKPOINT = [
     "sentinel_self_governing_safe_autonomy_kernel.py",
+    "sentinel_autonomous_operations_supervisor.py",
+    "sentinel_autonomy.py",
+    "sentinel_autonomous_operation_governor.py",
     "sentinel_autonomous_mission_queue_runner.py",
     "sentinel_autonomous_capability_health_governor.py",
     "playbooks/sentinel-self-governing-autonomy-kernel.playbook.json",
@@ -294,6 +299,14 @@ RECOMMENDED_GIT_CHECKPOINT = [
     "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
     "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
     "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
+    "playbooks/sentinel-autonomous-operations-supervisor.playbook.json",
+    "playbooks/sentinel-autonomous-operation-decision.playbook.json",
+    "playbooks/sentinel-autonomous-system-validation.playbook.json",
+    "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+    "playbooks/sentinel-autonomous-operation-governor.playbook.json",
+    "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
+    "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
+    "playbooks/sentinel-autonomous-operation-diversity.playbook.json",
 ]
 
 # ---------------------------------------------------------------------------
@@ -927,6 +940,31 @@ def mission_runner_context() -> Dict[str, Any]:
     }
 
 
+def operations_supervisor_context() -> Dict[str, Any]:
+    supervisor, status = read_optional_json(SUPERVISOR_JSON)
+    supervisor = supervisor if status == "ok" and isinstance(supervisor, dict) else {}
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operations_supervisor.json",
+        "available": bool(supervisor),
+        "supervisor_status": supervisor.get("status") if supervisor else "not_available",
+        "selected_operation": supervisor.get("selected_operation") if supervisor else None,
+        "next_operation": supervisor.get("next_operation") if supervisor else None,
+        "operations_completed": int(supervisor.get("operations_completed") or 0) if supervisor else 0,
+    }
+
+
+def operation_governor_context() -> Dict[str, Any]:
+    governor, status = read_optional_json(OPERATION_GOVERNOR_JSON)
+    governor = governor if status == "ok" and isinstance(governor, dict) else {}
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operation_governor.json",
+        "available": bool(governor),
+        "status": governor.get("status") if governor else status,
+        "selected_operation": governor.get("selected_operation_name") if governor else None,
+        "diversity_status": (governor.get("diversity") or {}).get("status") if governor else None,
+    }
+
+
 def decide(observation: Dict[str, Any], breach: bool) -> Dict[str, Any]:
     if breach:
         return {"selected_task": "halt_and_report", "reason": "breach detected",
@@ -1250,6 +1288,8 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
     capability_context = capability_context_for(task, decision)
     mission_context = mission_context_for(task, decision)
     mission_runner = mission_runner_context()
+    operations_supervisor = operations_supervisor_context()
+    operation_governor = operation_governor_context()
     health_governor, health_governor_status = read_optional_json(HEALTH_GOVERNOR_JSON)
     health_governor_context = {
         "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
@@ -1286,6 +1326,11 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
         "mission_runner_status": mission_runner.get("mission_runner_status"),
         "mission_runner_completed_count": mission_runner.get("completed_mission_count"),
         "mission_runner_stop_reason": mission_runner.get("stop_reason"),
+        "supervisor_status": operations_supervisor.get("supervisor_status"),
+        "selected_operation": operations_supervisor.get("selected_operation"),
+        "next_operation": operations_supervisor.get("next_operation"),
+        "operation_governor_status": operation_governor.get("status"),
+        "operation_governor_selected": operation_governor.get("selected_operation"),
         "selected_capability": capability_context.get("selected_capability"),
         "capability_health": capability_context.get("capability_health"),
         "capability_reason": capability_context.get("capability_reason"),
@@ -1329,6 +1374,8 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
         },
         "goal_manager_integration": mission_context,
         "mission_runner_integration": mission_runner,
+        "operations_supervisor_integration": operations_supervisor,
+        "operation_governor_integration": operation_governor,
         "capability_registry_integration": capability_context,
         "capability_health_governor_integration": health_governor_context,
         "classification": classification,
@@ -1497,6 +1544,11 @@ def render_owner_summary_md(s: Dict[str, Any]) -> str:
              f"- Mission runner status: {redact_text(s.get('mission_runner_status'))}",
              f"- Mission runner completed count: {redact_text(s.get('mission_runner_completed_count'))}",
              f"- Mission runner stop reason: {redact_text(s.get('mission_runner_stop_reason'))}",
+             f"- Supervisor status: {redact_text(s.get('supervisor_status'))}",
+             f"- Selected operation: {redact_text(s.get('selected_operation'))}",
+             f"- Next operation: {redact_text(s.get('next_operation'))}",
+             f"- Operation governor status: {redact_text(s.get('operation_governor_status'))}",
+             f"- Operation governor selected: {redact_text(s.get('operation_governor_selected'))}",
              f"- Selected capability: {redact_text(s.get('selected_capability'))}",
              f"- Capability health: {redact_text(s.get('capability_health'))}",
              f"- Capability risk: {redact_text(s.get('capability_risk'))}",

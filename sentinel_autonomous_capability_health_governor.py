@@ -228,6 +228,8 @@ BLOCKED_REPAIR_PATTERNS_JSON = STATE_DIR / "autonomous_capability_blocked_repair
 GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
 MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
 MISSION_COMPLETION_LEDGER_JSON = STATE_DIR / "autonomous_mission_completion_ledger.json"
+SUPERVISOR_JSON = STATE_DIR / "latest_autonomous_operations_supervisor.json"
+OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-capability-health-governor.jsonl"
 
@@ -396,6 +398,28 @@ def mission_state_summary() -> Dict[str, Any]:
         "completed_health_missions": len(completed_health_from_ledger),
         "blocked_health_missions": len(blocked_health_from_ledger),
         "last_health_mission_repair_result": completed_health_from_ledger[-1].get("validation_status") if completed_health_from_ledger else None,
+    }
+
+
+def supervisor_summary() -> Dict[str, Any]:
+    supervisor = load_dict(SUPERVISOR_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operations_supervisor.json",
+        "available": bool(supervisor),
+        "supervisor_status": supervisor.get("status") if supervisor else "not_available",
+        "supervisor_operation": supervisor.get("selected_operation") if supervisor else None,
+        "supervisor_triggered_repair_context": supervisor.get("selected_operation") == "run_health_governor_cycle" if supervisor else False,
+    }
+
+
+def operation_governor_summary() -> Dict[str, Any]:
+    governor = load_dict(OPERATION_GOVERNOR_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operation_governor.json",
+        "available": bool(governor),
+        "status": governor.get("status") if governor else "not_available",
+        "selected_operation": governor.get("selected_operation_name") if governor else None,
+        "noop_count": governor.get("noop_count") if governor else None,
     }
 
 
@@ -1060,6 +1084,7 @@ def write_playbooks(report: Dict[str, Any]) -> None:
 
 def render_report_md(report: Dict[str, Any]) -> str:
     mission = report.get("goal_manager_integration") if isinstance(report.get("goal_manager_integration"), dict) else {}
+    supervisor = report.get("operations_supervisor") if isinstance(report.get("operations_supervisor"), dict) else {}
     return "\n".join([
         "# Sentinel Autonomous Capability Health Governor",
         "",
@@ -1074,6 +1099,8 @@ def render_report_md(report: Dict[str, Any]) -> str:
         f"- health_related_missions: `{mission.get('health_related_mission_count', 0)}`",
         f"- mission_runner_status: `{mission.get('mission_runner_status', '-')}`",
         f"- completed_health_missions: `{mission.get('completed_health_missions', 0)}`",
+        f"- supervisor_status: `{supervisor.get('supervisor_status', '-')}`",
+        f"- supervisor_operation: `{supervisor.get('supervisor_operation', '-')}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1162,6 +1189,7 @@ def render_learning_md(report: Dict[str, Any]) -> str:
 def render_owner_summary_md(report: Dict[str, Any]) -> str:
     repaired_caps = sorted(set(str(item.get("capability_id")) for item in report.get("executed_repairs") or [] if item.get("capability_id")))
     mission = report.get("goal_manager_integration") if isinstance(report.get("goal_manager_integration"), dict) else {}
+    supervisor = report.get("operations_supervisor") if isinstance(report.get("operations_supervisor"), dict) else {}
     return "\n".join([
         "# Capability Health Owner Summary",
         "",
@@ -1178,6 +1206,8 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- completed_health_missions: `{mission.get('completed_health_missions', 0)}`",
         f"- blocked_health_missions: `{mission.get('blocked_health_missions', 0)}`",
         f"- mission_runner_status: `{mission.get('mission_runner_status', '-')}`",
+        f"- supervisor_status: `{supervisor.get('supervisor_status', '-')}`",
+        f"- supervisor_operation: `{supervisor.get('supervisor_operation', '-')}`",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
         "- allowed_apply_now: `False`",
@@ -1198,12 +1228,17 @@ def write_outputs(report: Dict[str, Any]) -> None:
         **report,
         **HARD_DEFAULTS,
         "goal_manager_integration": mission_state_summary(),
+        "operations_supervisor": supervisor_summary(),
+        "operation_governor": operation_governor_summary(),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
+            "sentinel_autonomous_operation_governor.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
             "playbooks/sentinel-autonomous-goal-manager.playbook.json",
@@ -1214,6 +1249,14 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
             "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
             "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
+            "playbooks/sentinel-autonomous-operations-supervisor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-decision.playbook.json",
+            "playbooks/sentinel-autonomous-system-validation.playbook.json",
+            "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-operation-governor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
+            "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
+            "playbooks/sentinel-autonomous-operation-diversity.playbook.json",
             "playbooks/sentinel-autonomous-capability-health-governor.playbook.json",
             "playbooks/sentinel-autonomous-capability-self-repair.playbook.json",
             "playbooks/sentinel-autonomous-capability-warning-classification.playbook.json",

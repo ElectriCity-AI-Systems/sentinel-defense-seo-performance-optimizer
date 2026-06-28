@@ -198,6 +198,11 @@ HEALTH_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_
 GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goal_manager.json"
 MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_mission_queue_runner.json"
 MISSION_COMPLETION_LEDGER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_mission_completion_ledger.json"
+SUPERVISOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operations_supervisor.json"
+OPERATIONS_HISTORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_operations_history.json"
+BLOCKED_OPERATIONS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_blocked_operation_patterns.json"
+OPERATION_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operation_governor.json"
+OPERATION_GOVERNOR_MODEL_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_operation_governor_model.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.md"
@@ -475,6 +480,11 @@ def read_inputs() -> Dict[str, Any]:
         GOAL_MANAGER_JSON,
         MISSION_RUNNER_JSON,
         MISSION_COMPLETION_LEDGER_JSON,
+        SUPERVISOR_JSON,
+        OPERATIONS_HISTORY_JSON,
+        BLOCKED_OPERATIONS_JSON,
+        OPERATION_GOVERNOR_JSON,
+        OPERATION_GOVERNOR_MODEL_JSON,
     ]
     statuses: Dict[str, str] = {}
     missing: List[str] = []
@@ -493,6 +503,10 @@ def read_inputs() -> Dict[str, Any]:
     goal_manager = load_dict(GOAL_MANAGER_JSON)
     mission_runner = load_dict(MISSION_RUNNER_JSON)
     mission_completion_ledger = load_dict(MISSION_COMPLETION_LEDGER_JSON)
+    operations_supervisor = load_dict(SUPERVISOR_JSON)
+    operations_history = load_dict(OPERATIONS_HISTORY_JSON)
+    blocked_operations = load_dict(BLOCKED_OPERATIONS_JSON)
+    operation_governor = load_dict(OPERATION_GOVERNOR_MODEL_JSON) or load_dict(OPERATION_GOVERNOR_JSON)
     git_status = exact_git_command("status")
     git_log = exact_git_command("log")
     return {
@@ -506,6 +520,10 @@ def read_inputs() -> Dict[str, Any]:
         "goal_manager": goal_manager,
         "mission_runner": mission_runner,
         "mission_completion_ledger": mission_completion_ledger,
+        "operations_supervisor": operations_supervisor,
+        "operations_history": operations_history,
+        "blocked_operations": blocked_operations,
+        "operation_governor": operation_governor,
         "recent_tasks": collect_recent_tasks(),
         "critical_json": critical_json_scan(),
         "public_assets": public_assets_status(),
@@ -965,6 +983,10 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
     registry = inputs.get("capability_registry")
     governor = health_governor_index(inputs)
     missions = mission_queue_index(inputs)
+    supervisor = inputs.get("operations_supervisor") if isinstance(inputs.get("operations_supervisor"), dict) else {}
+    operation_governor = inputs.get("operation_governor") if isinstance(inputs.get("operation_governor"), dict) else {}
+    operation_history = inputs.get("operations_history") if isinstance(inputs.get("operations_history"), dict) else {}
+    operation_entries = operation_history.get("entries") if isinstance(operation_history.get("entries"), list) else []
     registry_status = "ok" if isinstance(registry, dict) and registry.get("capabilities") else "missing_or_invalid"
     return {
         "missing_inputs": inputs.get("missing_inputs", []),
@@ -979,6 +1001,11 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "mission_count": missions.get("mission_count"),
         "mission_runner_status": missions.get("runner_status"),
         "mission_completion_count": missions.get("ledger_completed_count"),
+        "operations_supervisor_status": supervisor.get("status") if supervisor else "not_available",
+        "last_supervisor_operation": supervisor.get("selected_operation") if supervisor else None,
+        "operation_governor_status": operation_governor.get("status") if operation_governor else "not_available",
+        "operation_governor_selected": operation_governor.get("selected_operation_name") if operation_governor else None,
+        "operations_history_count": len(operation_entries),
         "git_status_count": len((inputs.get("git_status") or {}).get("lines") or []),
         "git_log_count": len((inputs.get("git_log") or {}).get("lines") or []),
     }
@@ -1113,6 +1140,18 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "selected_mission": selected_mission,
             "selected_mission_status": selected_mission_status,
         },
+        "operations_supervisor_integration": {
+            "state_path": "state/adaptive-learning/latest_autonomous_operations_supervisor.json",
+            "status": (scoring.get("inputs") or {}).get("operations_supervisor_status"),
+            "last_operation": (scoring.get("inputs") or {}).get("last_supervisor_operation"),
+            "operations_history_count": (scoring.get("inputs") or {}).get("operations_history_count"),
+        },
+        "operation_governor_integration": {
+            "state_path": "state/adaptive-learning/latest_autonomous_operation_governor.json",
+            "model_path": "state/adaptive-learning/autonomous_operation_governor_model.json",
+            "status": (scoring.get("inputs") or {}).get("operation_governor_status"),
+            "selected_operation": (scoring.get("inputs") or {}).get("operation_governor_selected"),
+        },
         "hard_defaults": HARD_DEFAULTS,
         "live_apply": False,
         "emergency_stop": True,
@@ -1122,8 +1161,11 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "medium_executable": False,
         "breach": bool(scoring.get("breach")),
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_priority_engine.py",
+            "sentinel_autonomous_operation_governor.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
@@ -1140,6 +1182,14 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
             "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
             "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
+            "playbooks/sentinel-autonomous-operations-supervisor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-decision.playbook.json",
+            "playbooks/sentinel-autonomous-system-validation.playbook.json",
+            "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-operation-governor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
+            "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
+            "playbooks/sentinel-autonomous-operation-diversity.playbook.json",
         ],
     }
     return model

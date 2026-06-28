@@ -74,6 +74,8 @@ LOCKFILE = STATE_DIR / "autonomous_mission_queue_runner.lock"
 
 GOAL_MANAGER_JSON = R / "sentinel-autonomous-goal-manager.json"
 GOAL_MANAGER_STATE_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
+SUPERVISOR_JSON = STATE_DIR / "latest_autonomous_operations_supervisor.json"
+OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-mission-queue-runner.jsonl"
 
@@ -733,6 +735,28 @@ def build_owner_summary() -> Dict[str, Any]:
     return report
 
 
+def supervisor_summary() -> Dict[str, Any]:
+    data = load_dict(SUPERVISOR_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operations_supervisor.json",
+        "available": bool(data),
+        "last_supervisor_status": data.get("status") if data else "not_available",
+        "last_supervisor_operation": data.get("selected_operation") if data else None,
+        "supervisor_stop_reason": data.get("stop_reason") if data else None,
+    }
+
+
+def operation_governor_summary() -> Dict[str, Any]:
+    data = load_dict(OPERATION_GOVERNOR_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_operation_governor.json",
+        "available": bool(data),
+        "status": data.get("status") if data else "not_available",
+        "selected_operation": data.get("selected_operation_name") if data else None,
+        "diversity_status": (data.get("diversity") or {}).get("status") if data else None,
+    }
+
+
 def base_report(action: str, status: str) -> Dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -751,7 +775,11 @@ def base_report(action: str, status: str) -> Dict[str, Any]:
         "owner_summary_status": "not_written",
         "learning_updates": [],
         "lockfile_status": "not_checked",
+        "operations_supervisor": supervisor_summary(),
+        "operation_governor": operation_governor_summary(),
         "integrations": {
+            "operations_supervisor": "readable_by_mission_queue_runner",
+            "operation_governor": "readable_by_mission_queue_runner",
             "goal_manager": "readable_by_runner",
             "health_governor": "reads_completion_ledger",
             "capability_registry": "reads_completion_ledger",
@@ -885,6 +913,8 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- completed_ledger_count: `{(report.get('completion_ledger') or {}).get('completed_count', 0)}`",
         f"- stop_reason: `{report.get('stop_reason', '-')}`",
         f"- next_recommended_mission: `{report.get('next_recommended_mission', '-')}`",
+        f"- supervisor_status: `{(report.get('operations_supervisor') or {}).get('last_supervisor_status', '-')}`",
+        f"- supervisor_operation: `{(report.get('operations_supervisor') or {}).get('last_supervisor_operation', '-')}`",
         "- blocked_scope: live systems, external APIs, remote writes, timers, MEDIUM, HIGH and LOW_LIVE",
         "- live_apply: `False`",
         "- emergency_stop: `True`",
@@ -939,17 +969,28 @@ def write_outputs(report: Dict[str, Any]) -> None:
         "completion_ledger_status": "COMPLETION_LEDGER_READY" if COMPLETION_LEDGER_JSON.exists() else "COMPLETION_LEDGER_PENDING",
         "owner_summary_status": "MISSION_QUEUE_RUNNER_OWNER_SUMMARY_READY",
         "recommended_git_checkpoint": [
+            "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_capability_registry.py",
             "sentinel_autonomous_priority_engine.py",
+            "sentinel_autonomous_operation_governor.py",
             "sentinel_self_governing_safe_autonomy_kernel.py",
             "sentinel_autonomous_cycle_runner.py",
             "playbooks/sentinel-autonomous-mission-queue-runner.playbook.json",
             "playbooks/sentinel-autonomous-mission-runner-stop-rules.playbook.json",
             "playbooks/sentinel-autonomous-mission-completion-ledger.playbook.json",
             "playbooks/sentinel-autonomous-mission-runner-owner-summary.playbook.json",
+            "playbooks/sentinel-autonomous-operations-supervisor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-decision.playbook.json",
+            "playbooks/sentinel-autonomous-system-validation.playbook.json",
+            "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-operation-governor.playbook.json",
+            "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
+            "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
+            "playbooks/sentinel-autonomous-operation-diversity.playbook.json",
         ],
     }
     write_json(REPORT_JSON, safe_report)

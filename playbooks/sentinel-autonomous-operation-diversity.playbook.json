@@ -1,0 +1,17 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-operation-diversity",
+  "phase": "10.8",
+  "rules": [
+    "at least two different operations in three steps when safe alternatives exist",
+    "at least three different operations in five steps when safe alternatives exist",
+    "choose safe alternative when repeated operation is in cooldown"
+  ],
+  "schema_version": "sentinel-autonomous-operation-governor-10.8"
+}

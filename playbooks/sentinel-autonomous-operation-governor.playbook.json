@@ -1,0 +1,32 @@
+{
+  "allowed_apply_now": false,
+  "allowed_operations": [
+    "run_health_governor_cycle",
+    "run_goal_manager_cycle",
+    "run_mission_queue_runner",
+    "run_priority_engine_model",
+    "run_capability_registry_refresh",
+    "run_kernel_safe_cycle",
+    "build_owner_briefing",
+    "validate_system",
+    "status_only"
+  ],
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "external_api",
+    "timer_install",
+    "HIGH_MEDIUM_LOW_LIVE_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-operation-governor",
+  "phase": "10.8",
+  "purpose": "Score safe local operations by impact, no-op, cooldown and diversity.",
+  "schema_version": "sentinel-autonomous-operation-governor-10.8"
+}

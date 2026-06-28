@@ -1,0 +1,19 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-operation-noop-detection",
+  "noop_signals": [
+    "same operation repeated",
+    "no new ledger entry",
+    "no health or score change",
+    "same selected operation without new reason",
+    "STOP_ON_MAX_BATCH without other effect"
+  ],
+  "phase": "10.8",
+  "schema_version": "sentinel-autonomous-operation-governor-10.8"
+}
