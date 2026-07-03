@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "fields": [
+    "steps completed",
+    "operations per step",
+    "regression gate",
+    "readiness seal",
+    "blocked capabilities",
+    "next safe operation"
+  ],
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-soak-owner-summary",
+  "phase": "10.9",
+  "schema_version": "sentinel-autonomous-soak-test-10.9"
+}

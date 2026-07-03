@@ -84,6 +84,8 @@ HEALTH_GOVERNOR_JSON = STATE_DIR / "autonomous_capability_health_governor.json"
 HEALTH_GOVERNOR_LATEST_JSON = STATE_DIR / "latest_autonomous_capability_health_governor.json"
 CAPABILITY_REGISTRY_JSON = STATE_DIR / "autonomous_capability_registry.json"
 PRIORITY_MODEL_JSON = STATE_DIR / "autonomy_task_priority_model.json"
+SOAK_TEST_JSON = STATE_DIR / "latest_autonomous_soak_test.json"
+SOAK_TEST_REPORT_JSON = R / "sentinel-autonomous-soak-test.json"
 
 REPORT_INPUTS = {
     "supervisor": R / "sentinel-autonomous-operations-supervisor.json",
@@ -94,6 +96,7 @@ REPORT_INPUTS = {
     "priority_engine": R / "sentinel-autonomous-priority-engine.json",
     "kernel": R / "sentinel-self-governing-autonomy-kernel.json",
     "cycle_runner": R / "sentinel-autonomous-cycle-runner.json",
+    "soak_test": SOAK_TEST_REPORT_JSON,
 }
 
 ALLOWED_WRITE_ROOTS = (R, STATE_DIR, AUDIT_DIR, PLAYBOOK_DIR)
@@ -340,12 +343,20 @@ def scan_operations() -> Dict[str, Any]:
         "health_governor": HEALTH_GOVERNOR_JSON,
         "capability_registry": CAPABILITY_REGISTRY_JSON,
         "priority_model": PRIORITY_MODEL_JSON,
+        "soak_test": SOAK_TEST_JSON,
     }
     for name, path in state_paths.items():
         data, status = read_json(path)
         inputs["state_inputs"][name] = {"status": status, "path": rel(path), "data": data if isinstance(data, dict) else {}}
         if status == "missing":
             inputs["missing_inputs"].append(rel(path))
+    soak_data = load_dict(SOAK_TEST_JSON) or load_dict(SOAK_TEST_REPORT_JSON)
+    inputs["soak_context"] = {
+        "last_soak_status": soak_data.get("status") if soak_data else "not_available",
+        "readiness_seal": soak_data.get("readiness_seal") if soak_data else None,
+        "no_op_status": ((soak_data.get("readiness") or {}).get("noop_status") or {}).get("status") if soak_data else None,
+        "diversity_status": ((soak_data.get("readiness") or {}).get("operation_diversity") or {}).get("status") if soak_data else None,
+    }
     for name, path in REPORT_INPUTS.items():
         data, status = read_json(path)
         inputs["report_inputs"][name] = {"status": status, "path": rel(path), "data": data if isinstance(data, dict) else {}}
@@ -816,6 +827,7 @@ def write_outputs(report: Dict[str, Any]) -> None:
         **HARD_DEFAULTS,
         "recommended_git_checkpoint": [
             "sentinel_autonomous_operation_governor.py",
+            "sentinel_autonomous_soak_test.py",
             "sentinel_autonomous_operations_supervisor.py",
             "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
@@ -829,6 +841,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
             "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
             "playbooks/sentinel-autonomous-operation-diversity.playbook.json",
+            "playbooks/sentinel-autonomous-soak-test.playbook.json",
+            "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+            "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+            "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
         ],
     }
     write_json(REPORT_JSON, safe)

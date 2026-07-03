@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "checks": [
+    "safety flags unchanged",
+    "json valid",
+    "secret scan zero",
+    "diversity ok",
+    "no noop dominance",
+    "completion ledger ok"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-regression-gate",
+  "phase": "10.9",
+  "schema_version": "sentinel-autonomous-soak-test-10.9"
+}

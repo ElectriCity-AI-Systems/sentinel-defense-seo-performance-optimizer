@@ -203,6 +203,7 @@ OPERATIONS_HISTORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_oper
 BLOCKED_OPERATIONS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_blocked_operation_patterns.json"
 OPERATION_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operation_governor.json"
 OPERATION_GOVERNOR_MODEL_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_operation_governor_model.json"
+SOAK_TEST_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_soak_test.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-priority-engine.md"
@@ -485,6 +486,7 @@ def read_inputs() -> Dict[str, Any]:
         BLOCKED_OPERATIONS_JSON,
         OPERATION_GOVERNOR_JSON,
         OPERATION_GOVERNOR_MODEL_JSON,
+        SOAK_TEST_JSON,
     ]
     statuses: Dict[str, str] = {}
     missing: List[str] = []
@@ -507,6 +509,7 @@ def read_inputs() -> Dict[str, Any]:
     operations_history = load_dict(OPERATIONS_HISTORY_JSON)
     blocked_operations = load_dict(BLOCKED_OPERATIONS_JSON)
     operation_governor = load_dict(OPERATION_GOVERNOR_MODEL_JSON) or load_dict(OPERATION_GOVERNOR_JSON)
+    soak_test = load_dict(SOAK_TEST_JSON)
     git_status = exact_git_command("status")
     git_log = exact_git_command("log")
     return {
@@ -524,6 +527,7 @@ def read_inputs() -> Dict[str, Any]:
         "operations_history": operations_history,
         "blocked_operations": blocked_operations,
         "operation_governor": operation_governor,
+        "soak_test": soak_test,
         "recent_tasks": collect_recent_tasks(),
         "critical_json": critical_json_scan(),
         "public_assets": public_assets_status(),
@@ -985,6 +989,7 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
     missions = mission_queue_index(inputs)
     supervisor = inputs.get("operations_supervisor") if isinstance(inputs.get("operations_supervisor"), dict) else {}
     operation_governor = inputs.get("operation_governor") if isinstance(inputs.get("operation_governor"), dict) else {}
+    soak_test = inputs.get("soak_test") if isinstance(inputs.get("soak_test"), dict) else {}
     operation_history = inputs.get("operations_history") if isinstance(inputs.get("operations_history"), dict) else {}
     operation_entries = operation_history.get("entries") if isinstance(operation_history.get("entries"), list) else []
     registry_status = "ok" if isinstance(registry, dict) and registry.get("capabilities") else "missing_or_invalid"
@@ -1005,6 +1010,8 @@ def summarize_inputs(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "last_supervisor_operation": supervisor.get("selected_operation") if supervisor else None,
         "operation_governor_status": operation_governor.get("status") if operation_governor else "not_available",
         "operation_governor_selected": operation_governor.get("selected_operation_name") if operation_governor else None,
+        "soak_test_status": soak_test.get("status") if soak_test else "not_available",
+        "readiness_seal": soak_test.get("readiness_seal") if soak_test else None,
         "operations_history_count": len(operation_entries),
         "git_status_count": len((inputs.get("git_status") or {}).get("lines") or []),
         "git_log_count": len((inputs.get("git_log") or {}).get("lines") or []),
@@ -1152,6 +1159,11 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "status": (scoring.get("inputs") or {}).get("operation_governor_status"),
             "selected_operation": (scoring.get("inputs") or {}).get("operation_governor_selected"),
         },
+        "soak_test_integration": {
+            "state_path": "state/adaptive-learning/latest_autonomous_soak_test.json",
+            "status": (scoring.get("inputs") or {}).get("soak_test_status"),
+            "readiness_seal": (scoring.get("inputs") or {}).get("readiness_seal"),
+        },
         "hard_defaults": HARD_DEFAULTS,
         "live_apply": False,
         "emergency_stop": True,
@@ -1162,6 +1174,7 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
         "breach": bool(scoring.get("breach")),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomous_soak_test.py",
             "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_priority_engine.py",
@@ -1186,6 +1199,10 @@ def priority_model_from_scoring(scoring: Dict[str, Any], status: str = "PRIORITY
             "playbooks/sentinel-autonomous-operation-decision.playbook.json",
             "playbooks/sentinel-autonomous-system-validation.playbook.json",
             "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-soak-test.playbook.json",
+            "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+            "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+            "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-operation-governor.playbook.json",
             "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
             "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",

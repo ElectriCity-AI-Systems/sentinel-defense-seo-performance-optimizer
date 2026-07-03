@@ -90,6 +90,8 @@ PRIORITY_ENGINE_JSON = R / "sentinel-autonomous-priority-engine.json"
 OPERATION_GOVERNOR_MODEL_JSON = STATE_DIR / "autonomous_operation_governor_model.json"
 OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
 OPERATION_GOVERNOR_REPORT_JSON = R / "sentinel-autonomous-operation-governor.json"
+SOAK_TEST_JSON = STATE_DIR / "latest_autonomous_soak_test.json"
+SOAK_TEST_REPORT_JSON = R / "sentinel-autonomous-soak-test.json"
 KERNEL_JSON = STATE_DIR / "latest_self_governing_autonomy_kernel.json"
 KERNEL_REPORT_JSON = R / "sentinel-self-governing-autonomy-kernel.json"
 CYCLE_RUNNER_JSON = STATE_DIR / "latest_autonomous_cycle_runner.json"
@@ -106,6 +108,7 @@ ALLOWED_MODULES = {
     "sentinel_autonomous_capability_registry.py",
     "sentinel_autonomous_priority_engine.py",
     "sentinel_autonomous_operation_governor.py",
+    "sentinel_autonomous_soak_test.py",
     "sentinel_self_governing_safe_autonomy_kernel.py",
     "sentinel_autonomous_cycle_runner.py",
 }
@@ -145,6 +148,10 @@ ALLOWED_ARGS = {
     "--score-operations",
     "--detect-noops",
     "--select-operation",
+    "--run-soak",
+    "--validate-soak",
+    "--regression-gate",
+    "--build-readiness-seal",
     "--observe",
     "--decide",
     "--classify",
@@ -379,7 +386,7 @@ def module_arg_allowed(module: str, args: List[str]) -> bool:
     while i < len(args):
         arg = str(args[i])
         if arg not in ALLOWED_ARGS:
-            if i > 0 and args[i - 1] in {"--run-missions", "--run-cycles", "--simulate-diversity"} and str(arg).isdigit():
+            if i > 0 and args[i - 1] in {"--run-missions", "--run-cycles", "--simulate-diversity", "--run-soak"} and str(arg).isdigit():
                 i += 1
                 continue
             return False
@@ -424,6 +431,7 @@ def json_statuses() -> Dict[str, str]:
         "capability_registry": CAPABILITY_REGISTRY_REPORT_JSON,
         "priority_engine": PRIORITY_ENGINE_JSON,
         "operation_governor": OPERATION_GOVERNOR_REPORT_JSON,
+        "soak_test": SOAK_TEST_REPORT_JSON,
         "kernel": KERNEL_REPORT_JSON,
         "cycle_runner": CYCLE_RUNNER_REPORT_JSON,
         "completion_ledger": COMPLETION_LEDGER_JSON,
@@ -439,6 +447,7 @@ def gather_state() -> Dict[str, Any]:
         "capability_registry": load_dict(CAPABILITY_REGISTRY_JSON) or load_dict(CAPABILITY_REGISTRY_REPORT_JSON),
         "priority_engine": load_dict(PRIORITY_MODEL_JSON) or load_dict(PRIORITY_ENGINE_JSON),
         "operation_governor": load_dict(OPERATION_GOVERNOR_MODEL_JSON) or load_dict(OPERATION_GOVERNOR_JSON) or load_dict(OPERATION_GOVERNOR_REPORT_JSON),
+        "soak_test": load_dict(SOAK_TEST_JSON) or load_dict(SOAK_TEST_REPORT_JSON),
         "kernel": load_dict(KERNEL_JSON) or load_dict(KERNEL_REPORT_JSON),
         "cycle_runner": load_dict(CYCLE_RUNNER_JSON) or load_dict(CYCLE_RUNNER_REPORT_JSON),
         "completion_ledger": load_dict(COMPLETION_LEDGER_JSON),
@@ -459,6 +468,7 @@ def gather_state() -> Dict[str, Any]:
             "capability_registry": age_hours(CAPABILITY_REGISTRY_JSON),
             "priority_model": age_hours(PRIORITY_MODEL_JSON),
             "operation_governor_model": age_hours(OPERATION_GOVERNOR_MODEL_JSON),
+            "soak_test": age_hours(SOAK_TEST_JSON),
             "kernel": age_hours(KERNEL_JSON),
             "completion_ledger": age_hours(COMPLETION_LEDGER_JSON),
         },
@@ -685,6 +695,7 @@ def system_health_summary(state: Optional[Dict[str, Any]] = None) -> Dict[str, A
     health = reports.get("health_governor") if isinstance(reports.get("health_governor"), dict) else {}
     mission_runner = reports.get("mission_runner") if isinstance(reports.get("mission_runner"), dict) else {}
     operation_governor = reports.get("operation_governor") if isinstance(reports.get("operation_governor"), dict) else {}
+    soak_test = reports.get("soak_test") if isinstance(reports.get("soak_test"), dict) else {}
     return {
         "json_invalid_count": len(invalid),
         "json_missing_count": len(missing),
@@ -695,6 +706,9 @@ def system_health_summary(state: Optional[Dict[str, Any]] = None) -> Dict[str, A
         "mission_completion_count": int(mission_runner.get("missions_completed") or 0) if mission_runner else 0,
         "operation_governor_status": operation_governor.get("status") if operation_governor else "not_available",
         "operation_governor_selected": operation_governor.get("selected_operation_name") if operation_governor else None,
+        "last_soak_status": soak_test.get("status") if soak_test else "not_available",
+        "readiness_seal": soak_test.get("readiness_seal") if soak_test else None,
+        "regression_gate_status": soak_test.get("regression_gate_status") if soak_test else None,
         "status": "SYSTEM_HEALTH_OK" if not invalid else "SYSTEM_HEALTH_WARNINGS",
     }
 
@@ -967,6 +981,7 @@ def base_report(action: str, status: str) -> Dict[str, Any]:
             "capability_registry": "reads_supervisor_state",
             "priority_engine": "reads_supervisor_state",
             "operation_governor": "supervisor_reads_governor_model",
+            "soak_test": "supervisor_reads_soak_state",
             "kernel": "reads_supervisor_state",
             "cycle_runner": "reads_supervisor_state",
         },
@@ -1175,6 +1190,9 @@ def render_owner_briefing_md(report: Dict[str, Any]) -> str:
         f"- selected_operation: `{report.get('selected_operation')}`",
         f"- operation_governor_status: `{system_health.get('operation_governor_status', '-')}`",
         f"- operation_governor_selected: `{system_health.get('operation_governor_selected', '-')}`",
+        f"- last_soak_status: `{system_health.get('last_soak_status', '-')}`",
+        f"- readiness_seal: `{system_health.get('readiness_seal', '-')}`",
+        f"- regression_gate_status: `{system_health.get('regression_gate_status', '-')}`",
         f"- modules_executed: `{', '.join(modules) or '-'}`",
         f"- operations_completed: `{report.get('operations_completed', 0)}`",
         f"- stop_reason: `{report.get('stop_reason', '-')}`",
@@ -1221,6 +1239,7 @@ def write_outputs(report: Dict[str, Any]) -> None:
         "owner_briefing_status": "OWNER_BRIEFING_READY",
         "recommended_git_checkpoint": [
             "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomous_soak_test.py",
             "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
@@ -1234,6 +1253,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-operation-decision.playbook.json",
             "playbooks/sentinel-autonomous-system-validation.playbook.json",
             "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-soak-test.playbook.json",
+            "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+            "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+            "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-operation-governor.playbook.json",
             "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
             "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",

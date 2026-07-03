@@ -76,6 +76,7 @@ GOAL_MANAGER_JSON = R / "sentinel-autonomous-goal-manager.json"
 GOAL_MANAGER_STATE_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
 SUPERVISOR_JSON = STATE_DIR / "latest_autonomous_operations_supervisor.json"
 OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
+SOAK_TEST_JSON = STATE_DIR / "latest_autonomous_soak_test.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-mission-queue-runner.jsonl"
 
@@ -757,6 +758,17 @@ def operation_governor_summary() -> Dict[str, Any]:
     }
 
 
+def soak_context_summary() -> Dict[str, Any]:
+    data = load_dict(SOAK_TEST_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_soak_test.json",
+        "available": bool(data),
+        "status": data.get("status") if data else "not_available",
+        "readiness_seal": data.get("readiness_seal") if data else None,
+        "running_under_soak": data.get("action") == "run-soak" if data else False,
+    }
+
+
 def base_report(action: str, status: str) -> Dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
@@ -777,9 +789,11 @@ def base_report(action: str, status: str) -> Dict[str, Any]:
         "lockfile_status": "not_checked",
         "operations_supervisor": supervisor_summary(),
         "operation_governor": operation_governor_summary(),
+        "soak_context": soak_context_summary(),
         "integrations": {
             "operations_supervisor": "readable_by_mission_queue_runner",
             "operation_governor": "readable_by_mission_queue_runner",
+            "soak_test": "mission_runner_reads_soak_context",
             "goal_manager": "readable_by_runner",
             "health_governor": "reads_completion_ledger",
             "capability_registry": "reads_completion_ledger",
@@ -970,6 +984,7 @@ def write_outputs(report: Dict[str, Any]) -> None:
         "owner_summary_status": "MISSION_QUEUE_RUNNER_OWNER_SUMMARY_READY",
         "recommended_git_checkpoint": [
             "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomous_soak_test.py",
             "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
@@ -987,6 +1002,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-operation-decision.playbook.json",
             "playbooks/sentinel-autonomous-system-validation.playbook.json",
             "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-soak-test.playbook.json",
+            "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+            "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+            "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-operation-governor.playbook.json",
             "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
             "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",

@@ -1,0 +1,33 @@
+{
+  "allowed_apply_now": false,
+  "allowed_subprocess_modules": [
+    "sentinel_autonomous_capability_health_governor.py",
+    "sentinel_autonomous_capability_registry.py",
+    "sentinel_autonomous_cycle_runner.py",
+    "sentinel_autonomous_goal_manager.py",
+    "sentinel_autonomous_mission_queue_runner.py",
+    "sentinel_autonomous_operation_governor.py",
+    "sentinel_autonomous_operations_supervisor.py",
+    "sentinel_autonomous_priority_engine.py",
+    "sentinel_self_governing_safe_autonomy_kernel.py"
+  ],
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "external_api",
+    "remote_write",
+    "timer_install",
+    "LOW_LIVE_MEDIUM_HIGH_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "max_soak_steps": 5,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-soak-test",
+  "phase": "10.9",
+  "purpose": "Run repeated safe local supervisor batches and validate stability after every batch.",
+  "schema_version": "sentinel-autonomous-soak-test-10.9"
+}

@@ -1,0 +1,29 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "green": [
+    "soak steps ok",
+    "safety drift ok",
+    "json ok",
+    "operation diversity ok",
+    "owner briefing ready"
+  ],
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-readiness-seal",
+  "phase": "10.9",
+  "red": [
+    "breach",
+    "safety drift",
+    "secret finding",
+    "invalid json",
+    "unsafe execution attempt"
+  ],
+  "schema_version": "sentinel-autonomous-soak-test-10.9",
+  "yellow": [
+    "safe but warning or freshness topics remain"
+  ]
+}

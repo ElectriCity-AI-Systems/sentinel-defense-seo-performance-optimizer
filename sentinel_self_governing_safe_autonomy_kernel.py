@@ -234,6 +234,7 @@ GOAL_MANAGER_JSON = STATE_DIR / "latest_autonomous_goal_manager.json"
 MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
 SUPERVISOR_JSON = STATE_DIR / "latest_autonomous_operations_supervisor.json"
 OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
+SOAK_TEST_JSON = STATE_DIR / "latest_autonomous_soak_test.json"
 SUCCESS_PATTERNS_JSON = STATE_DIR / "autonomy_success_patterns.json"
 BLOCKED_PATTERNS_JSON = STATE_DIR / "autonomy_blocked_patterns.json"
 REPAIR_PATTERNS_JSON = STATE_DIR / "autonomy_repair_patterns.json"
@@ -283,6 +284,7 @@ FORBIDDEN_INSTALL_PATH_TOKENS = (
 RECOMMENDED_GIT_CHECKPOINT = [
     "sentinel_self_governing_safe_autonomy_kernel.py",
     "sentinel_autonomous_operations_supervisor.py",
+    "sentinel_autonomous_soak_test.py",
     "sentinel_autonomy.py",
     "sentinel_autonomous_operation_governor.py",
     "sentinel_autonomous_mission_queue_runner.py",
@@ -303,6 +305,10 @@ RECOMMENDED_GIT_CHECKPOINT = [
     "playbooks/sentinel-autonomous-operation-decision.playbook.json",
     "playbooks/sentinel-autonomous-system-validation.playbook.json",
     "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+    "playbooks/sentinel-autonomous-soak-test.playbook.json",
+    "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+    "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+    "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
     "playbooks/sentinel-autonomous-operation-governor.playbook.json",
     "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
     "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
@@ -965,6 +971,18 @@ def operation_governor_context() -> Dict[str, Any]:
     }
 
 
+def soak_test_context() -> Dict[str, Any]:
+    soak, status = read_optional_json(SOAK_TEST_JSON)
+    soak = soak if status == "ok" and isinstance(soak, dict) else {}
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_soak_test.json",
+        "available": bool(soak),
+        "status": soak.get("status") if soak else status,
+        "readiness_seal": soak.get("readiness_seal") if soak else None,
+        "soak_steps_completed": soak.get("soak_steps_completed") if soak else 0,
+    }
+
+
 def decide(observation: Dict[str, Any], breach: bool) -> Dict[str, Any]:
     if breach:
         return {"selected_task": "halt_and_report", "reason": "breach detected",
@@ -1290,6 +1308,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
     mission_runner = mission_runner_context()
     operations_supervisor = operations_supervisor_context()
     operation_governor = operation_governor_context()
+    soak_test = soak_test_context()
     health_governor, health_governor_status = read_optional_json(HEALTH_GOVERNOR_JSON)
     health_governor_context = {
         "state_path": "state/adaptive-learning/latest_autonomous_capability_health_governor.json",
@@ -1331,6 +1350,8 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
         "next_operation": operations_supervisor.get("next_operation"),
         "operation_governor_status": operation_governor.get("status"),
         "operation_governor_selected": operation_governor.get("selected_operation"),
+        "soak_test_status": soak_test.get("status"),
+        "readiness_seal": soak_test.get("readiness_seal"),
         "selected_capability": capability_context.get("selected_capability"),
         "capability_health": capability_context.get("capability_health"),
         "capability_reason": capability_context.get("capability_reason"),
@@ -1376,6 +1397,7 @@ def build_full_state(execute_flag: bool = False) -> Dict[str, Any]:
         "mission_runner_integration": mission_runner,
         "operations_supervisor_integration": operations_supervisor,
         "operation_governor_integration": operation_governor,
+        "soak_test_integration": soak_test,
         "capability_registry_integration": capability_context,
         "capability_health_governor_integration": health_governor_context,
         "classification": classification,
@@ -1549,6 +1571,8 @@ def render_owner_summary_md(s: Dict[str, Any]) -> str:
              f"- Next operation: {redact_text(s.get('next_operation'))}",
              f"- Operation governor status: {redact_text(s.get('operation_governor_status'))}",
              f"- Operation governor selected: {redact_text(s.get('operation_governor_selected'))}",
+             f"- Soak test status: {redact_text(s.get('soak_test_status'))}",
+             f"- Readiness seal: {redact_text(s.get('readiness_seal'))}",
              f"- Selected capability: {redact_text(s.get('selected_capability'))}",
              f"- Capability health: {redact_text(s.get('capability_health'))}",
              f"- Capability risk: {redact_text(s.get('capability_risk'))}",

@@ -289,6 +289,7 @@ MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_m
 MISSION_COMPLETION_LEDGER_JSON = PROJECT_DIR / "state/adaptive-learning/autonomous_mission_completion_ledger.json"
 SUPERVISOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operations_supervisor.json"
 OPERATION_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operation_governor.json"
+SOAK_TEST_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_soak_test.json"
 
 TASK_MEMORY_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_task_memory.json"
 SUCCESS_PATTERNS_JSON = PROJECT_DIR / "state/adaptive-learning/autonomy_success_patterns.json"
@@ -787,6 +788,17 @@ def operation_governor_summary() -> Dict[str, Any]:
     }
 
 
+def soak_context_summary() -> Dict[str, Any]:
+    soak = load_dict(SOAK_TEST_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_soak_test.json",
+        "available": bool(soak),
+        "status": soak.get("status") if soak else "not_available",
+        "readiness_seal": soak.get("readiness_seal") if soak else None,
+        "capabilities_exercised_context": soak.get("operations_per_soak_step") if soak else [],
+    }
+
+
 def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY") -> Dict[str, Any]:
     registry = discover_capabilities()
     router = route_next_skill(registry)
@@ -801,11 +813,13 @@ def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY"
         "goal_manager": goals,
         "operations_supervisor": supervisor,
         "operation_governor": operation_governor_summary(),
+        "soak_context": soak_context_summary(),
         "router": router,
         "recommended_capability": router.get("selected_capability"),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_capability_health_governor.py",
             "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomous_soak_test.py",
             "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
@@ -830,6 +844,10 @@ def build_registry(write: bool = True, status: str = "CAPABILITY_REGISTRY_READY"
             "playbooks/sentinel-autonomous-operation-decision.playbook.json",
             "playbooks/sentinel-autonomous-system-validation.playbook.json",
             "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-soak-test.playbook.json",
+            "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+            "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+            "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-operation-governor.playbook.json",
             "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
             "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",

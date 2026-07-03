@@ -30,6 +30,7 @@ GOAL_MANAGER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_goa
 MISSION_RUNNER_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_mission_queue_runner.json"
 SUPERVISOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operations_supervisor.json"
 OPERATION_GOVERNOR_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_operation_governor.json"
+SOAK_TEST_JSON = PROJECT_DIR / "state/adaptive-learning/latest_autonomous_soak_test.json"
 
 REPORT_JSON = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.json"
 REPORT_MD = PROJECT_DIR / "reports/latest/sentinel-autonomous-cycle-runner.md"
@@ -365,6 +366,17 @@ def operation_governor_summary() -> Dict[str, Any]:
         "status": data.get("status") if data else "not_available",
         "selected_operation": data.get("selected_operation_name") if data else None,
         "diversity_status": (data.get("diversity") or {}).get("status") if data else None,
+    }
+
+
+def soak_test_summary() -> Dict[str, Any]:
+    data = load_dict(SOAK_TEST_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_soak_test.json",
+        "available": bool(data),
+        "status": data.get("status") if data else "not_available",
+        "readiness_seal": data.get("readiness_seal") if data else None,
+        "soak_steps_completed": data.get("soak_steps_completed") if data else 0,
     }
 
 
@@ -764,6 +776,7 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
     mission_runner_summary = mission_queue_runner_summary()
     supervisor_summary = operations_supervisor_summary()
     operation_governor = operation_governor_summary()
+    soak_test = soak_test_summary()
     report.update({
         "requested_cycles": max_cycles,
         "cycles_completed": len(cycles),
@@ -787,11 +800,14 @@ def run_cycles(max_cycles: int, run_once: bool = False) -> Dict[str, Any]:
         "mission_queue_runner_status": mission_runner_summary.get("status"),
         "operations_supervisor": supervisor_summary,
         "operation_governor": operation_governor,
+        "soak_test": soak_test,
         "supervisor_status": supervisor_summary.get("supervisor_status"),
         "operation_history_count": supervisor_summary.get("operation_history_count"),
         "last_operation": supervisor_summary.get("last_operation"),
         "operation_governor_status": operation_governor.get("status"),
         "operation_governor_selected": operation_governor.get("selected_operation"),
+        "soak_test_status": soak_test.get("status"),
+        "readiness_seal": soak_test.get("readiness_seal"),
         "capability_health_before": governor_summary.get("capability_health_before"),
         "capability_health_after": governor_summary.get("capability_health_after"),
         "repairs_attempted": governor_summary.get("repairs_attempted"),
@@ -1155,6 +1171,8 @@ def render_owner_summary_md(report: Dict[str, Any]) -> str:
         f"- last_operation: `{report.get('last_operation', '-')}`",
         f"- operation_governor_status: `{report.get('operation_governor_status', '-')}`",
         f"- operation_governor_selected: `{report.get('operation_governor_selected', '-')}`",
+        f"- soak_test_status: `{report.get('soak_test_status', '-')}`",
+        f"- readiness_seal: `{report.get('readiness_seal', '-')}`",
         f"- capability_diversity: `{capability_diversity.get('status', '-')}`",
         f"- unique_capability_count: `{capability_diversity.get('unique_capability_count', '-')}`",
         f"- capability_health_before: `{report.get('capability_health_before', '-')}`",

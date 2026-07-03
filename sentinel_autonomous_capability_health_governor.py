@@ -230,6 +230,7 @@ MISSION_RUNNER_JSON = STATE_DIR / "latest_autonomous_mission_queue_runner.json"
 MISSION_COMPLETION_LEDGER_JSON = STATE_DIR / "autonomous_mission_completion_ledger.json"
 SUPERVISOR_JSON = STATE_DIR / "latest_autonomous_operations_supervisor.json"
 OPERATION_GOVERNOR_JSON = STATE_DIR / "latest_autonomous_operation_governor.json"
+SOAK_TEST_JSON = STATE_DIR / "latest_autonomous_soak_test.json"
 
 AUDIT_JSONL = AUDIT_DIR / "sentinel-autonomous-capability-health-governor.jsonl"
 
@@ -420,6 +421,17 @@ def operation_governor_summary() -> Dict[str, Any]:
         "status": governor.get("status") if governor else "not_available",
         "selected_operation": governor.get("selected_operation_name") if governor else None,
         "noop_count": governor.get("noop_count") if governor else None,
+    }
+
+
+def soak_context_summary() -> Dict[str, Any]:
+    soak = load_dict(SOAK_TEST_JSON)
+    return {
+        "state_path": "state/adaptive-learning/latest_autonomous_soak_test.json",
+        "available": bool(soak),
+        "status": soak.get("status") if soak else "not_available",
+        "readiness_seal": soak.get("readiness_seal") if soak else None,
+        "repairs_during_soak_context": soak.get("soak_steps_completed") if soak else 0,
     }
 
 
@@ -1230,8 +1242,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
         "goal_manager_integration": mission_state_summary(),
         "operations_supervisor": supervisor_summary(),
         "operation_governor": operation_governor_summary(),
+        "soak_context": soak_context_summary(),
         "recommended_git_checkpoint": [
             "sentinel_autonomous_operations_supervisor.py",
+            "sentinel_autonomous_soak_test.py",
             "sentinel_autonomy.py",
             "sentinel_autonomous_mission_queue_runner.py",
             "sentinel_autonomous_goal_manager.py",
@@ -1253,6 +1267,10 @@ def write_outputs(report: Dict[str, Any]) -> None:
             "playbooks/sentinel-autonomous-operation-decision.playbook.json",
             "playbooks/sentinel-autonomous-system-validation.playbook.json",
             "playbooks/sentinel-autonomous-owner-briefing.playbook.json",
+            "playbooks/sentinel-autonomous-soak-test.playbook.json",
+            "playbooks/sentinel-autonomous-regression-gate.playbook.json",
+            "playbooks/sentinel-autonomous-readiness-seal.playbook.json",
+            "playbooks/sentinel-autonomous-soak-owner-summary.playbook.json",
             "playbooks/sentinel-autonomous-operation-governor.playbook.json",
             "playbooks/sentinel-autonomous-operation-impact-scoring.playbook.json",
             "playbooks/sentinel-autonomous-operation-noop-detection.playbook.json",
