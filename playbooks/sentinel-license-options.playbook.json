@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "legal_advice": "not_provided",
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-license-options",
+  "options": [
+    "apache-2.0",
+    "bsl",
+    "custom-commercial",
+    "mit",
+    "polyform-noncommercial"
+  ],
+  "phase": "10.14",
+  "schema_version": "sentinel-license-decision-finalizer-10.14"
+}

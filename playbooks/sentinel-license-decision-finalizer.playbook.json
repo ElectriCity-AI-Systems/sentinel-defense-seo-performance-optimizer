@@ -1,0 +1,21 @@
+{
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "timer_install",
+    "marketplace_api",
+    "LOW_LIVE_MEDIUM_HIGH_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-license-decision-finalizer",
+  "phase": "10.14",
+  "purpose": "Document owner license options, final release drafts and release-final validation.",
+  "schema_version": "sentinel-license-decision-finalizer-10.14"
+}

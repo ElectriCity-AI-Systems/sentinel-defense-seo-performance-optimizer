@@ -1,0 +1,19 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "drafts": [
+    "root_readme_activation",
+    "release_tag",
+    "github_release",
+    "payhip_launch",
+    "gumroad_launch"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-final-release-drafts",
+  "phase": "10.14",
+  "schema_version": "sentinel-license-decision-finalizer-10.14"
+}

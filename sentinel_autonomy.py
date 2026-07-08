@@ -25,12 +25,29 @@ COMMANDS = {
     "operation-governor-status": ["python3", "sentinel_autonomous_operation_governor.py", "--status"],
     "soak-status": ["python3", "sentinel_autonomous_soak_test.py", "--status"],
     "readiness-seal": ["python3", "sentinel_autonomous_soak_test.py", "--build-readiness-seal"],
+    "rc-status": ["python3", "sentinel_autonomous_release_candidate.py", "--status"],
+    "rc-briefing": ["python3", "sentinel_autonomous_release_candidate.py", "--build-owner-console"],
+    "rc-evidence": ["python3", "sentinel_autonomous_release_candidate.py", "--build-evidence-pack"],
+    "rc-runbook": ["python3", "sentinel_autonomous_release_candidate.py", "--build-runbook"],
+    "public-release-status": ["python3", "sentinel_public_release_pack.py", "--status"],
+    "public-summary": ["python3", "sentinel_public_release_pack.py", "--build-readme"],
+    "sales-copy": ["python3", "sentinel_public_release_pack.py", "--build-sales-copy"],
+    "github-release-notes": ["python3", "sentinel_public_release_pack.py", "--build-github-release-notes"],
+    "distribution-status": ["python3", "sentinel_distribution_release_pack.py", "--status"],
+    "release-checklist": ["python3", "sentinel_distribution_release_pack.py", "--build-repository-hygiene"],
+    "changelog": ["python3", "sentinel_distribution_release_pack.py", "--build-changelog"],
+    "marketplace-checklist": ["python3", "sentinel_distribution_release_pack.py", "--build-marketplace-checklists"],
+    "license-status": ["python3", "sentinel_license_decision_finalizer.py", "--status"],
+    "license-options": ["python3", "sentinel_license_decision_finalizer.py", "--build-license-options"],
+    "release-final-status": ["python3", "sentinel_license_decision_finalizer.py", "--validate-final-release"],
+    "release-draft": ["python3", "sentinel_license_decision_finalizer.py", "--build-final-github-release-draft"],
+    "manual-publication-checklist": ["python3", "sentinel_license_decision_finalizer.py", "--validate-final-release"],
 }
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Safe local Sentinel autonomy wrapper")
-    parser.add_argument("command", choices=["status", "preflight", "run-safe-once", "run-safe-batch", "briefing", "operation-governor-status", "soak-status", "soak-run", "readiness-seal"])
+    parser.add_argument("command", choices=["status", "preflight", "run-safe-once", "run-safe-batch", "briefing", "operation-governor-status", "soak-status", "soak-run", "readiness-seal", "rc-status", "rc-briefing", "rc-evidence", "rc-runbook", "public-release-status", "public-summary", "sales-copy", "github-release-notes", "distribution-status", "release-checklist", "changelog", "marketplace-checklist", "license-status", "license-options", "release-final-status", "release-draft", "manual-publication-checklist"])
     parser.add_argument("count", nargs="?")
     args = parser.parse_args(argv)
 
