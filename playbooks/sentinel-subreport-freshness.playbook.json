@@ -1,0 +1,14 @@
+{
+  "current_max_seconds": 86400,
+  "freshness_states": [
+    "CURRENT",
+    "STALE_INFORMATIONAL",
+    "STALE_EXCLUDED_FROM_MASTER_STATUS",
+    "MISSING",
+    "INVALID_TIMESTAMP"
+  ],
+  "name": "sentinel-subreport-freshness",
+  "phase": "10.16",
+  "policy": "Reports older than seven days, missing reports and reports without valid timestamps cannot affect master status.",
+  "stale_informational_max_seconds": 604800
+}

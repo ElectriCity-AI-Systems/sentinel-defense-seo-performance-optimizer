@@ -1,0 +1,19 @@
+{
+  "name": "sentinel-private-public-report-split",
+  "phase": "10.16",
+  "private_classification": [
+    "PRIVATE_OWNER_OPERATIONAL_REPORT",
+    "NOT_FOR_PUBLIC_RELEASE",
+    "NOT_FOR_GIT",
+    "CONTAINS_INFRASTRUCTURE_METADATA"
+  ],
+  "public_omissions": [
+    "ip_addresses",
+    "server_hostnames",
+    "absolute_server_paths",
+    "internal_api_endpoints",
+    "domain_origin_mappings",
+    "firewall_security_configuration"
+  ],
+  "public_summary_policy": "Use general operational statements only; retain detailed infrastructure evidence in private owner reports."
+}

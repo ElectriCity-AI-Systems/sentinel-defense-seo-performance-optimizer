@@ -1,0 +1,17 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-master-report-consistency",
+  "phase": "10.16",
+  "purpose": "Reconcile freshness, apply semantics, owner priority and report structure using local evidence only.",
+  "writes": [
+    "reports/latest",
+    "state/adaptive-learning",
+    "audit"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "breach": false,
+  "name": "sentinel-owner-priority",
+  "new_waf_rule_recommended": false,
+  "phase": "10.16",
+  "priority_order": [
+    "SAFETY_BREACH_ESCALATION",
+    "WEBSITE_ORIGIN_STABILITY",
+    "WEBSITE_TARGETED_MONITORING",
+    "SEO_TITLE_REVIEW"
+  ],
+  "rule": "Website CRITICAL with active 5xx evidence takes priority over SEO and metadata review.",
+  "safety": "No production, remote, scheduler, LOW_LIVE, MEDIUM or HIGH action is executable."
+}
