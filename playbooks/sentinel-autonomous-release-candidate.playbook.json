@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "timer_install",
+    "LOW_LIVE_MEDIUM_HIGH_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-release-candidate",
+  "phase": "10.10",
+  "purpose": "Build local RC manifest, evidence, owner console, runbook and safety validation.",
+  "schema_version": "sentinel-autonomous-release-candidate-10.10"
+}

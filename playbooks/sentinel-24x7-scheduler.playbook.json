@@ -1,0 +1,13 @@
+{
+  "activation": "only_after_guarded_preflight_green",
+  "command": [
+    "/usr/bin/python3",
+    "/srv/sentinel-defense/sentinel_guarded_autonomy.py",
+    "--run-cycle"
+  ],
+  "frequency_minutes": 2,
+  "name": "sentinel-24x7-scheduler",
+  "parallel_runs": "blocked_by_runtime_lock",
+  "service": "sentinel-guarded-autonomy.service",
+  "timer": "sentinel-guarded-autonomy.timer"
+}

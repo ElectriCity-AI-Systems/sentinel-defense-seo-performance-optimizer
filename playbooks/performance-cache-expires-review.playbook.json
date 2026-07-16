@@ -1,0 +1,66 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "write trend state",
+    "write reports",
+    "write snapshots",
+    "write audit",
+    "prepare owner review"
+  ],
+  "blocked_actions": [
+    "live apply",
+    "remote write",
+    "DB write",
+    "cache purge",
+    "CDN rule change",
+    "Nginx change",
+    ".htaccess change",
+    "FSE/Post/Page/Theme/Plugin edit"
+  ],
+  "checks": {
+    "cache_control": "no-cache",
+    "cf_cache_status": "HIT",
+    "expires_tag_missing": true,
+    "global_p90_latency_ms": 432.0,
+    "global_p90_ttfb_ms": 266.0,
+    "global_success_rate_percent": 100.0
+  },
+  "disable_conditions": [
+    "breach=true",
+    "forbidden command pattern",
+    "secret-like output",
+    "unexpected apply mode"
+  ],
+  "healthchecks": [
+    "before/after score compare if future owner-approved action exists",
+    "public read-only HTML check",
+    "cache header check"
+  ],
+  "inputs": [
+    "/srv/sentinel-defense/reports/latest/external-seo-report-ingest.json",
+    "/srv/sentinel-defense/reports/latest/external-seo-report-recommendations.json",
+    "/srv/sentinel-defense/reports/latest/low-risk-autonomy.json",
+    "/srv/sentinel-defense/state/low-risk-autonomy/latest.json",
+    "/srv/sentinel-defense/reports/latest/global-checker-ingest.json",
+    "/srv/sentinel-defense/reports/latest/adaptive-learning-engine.json",
+    "/srv/sentinel-defense/state/adaptive-learning/knowledge_base.json",
+    "/srv/sentinel-defense/state/adaptive-learning/patterns.json",
+    "/srv/sentinel-defense/state/adaptive-learning/latest.json"
+  ],
+  "name": "performance-cache-expires-dryrun",
+  "output_reports": [
+    "reports/latest/concrete-performance-dryrun.json",
+    "reports/latest/concrete-performance-owner-review-pack.md"
+  ],
+  "owner_review_required": true,
+  "purpose": "Prepare concrete performance dry-run review for cache-expires; no production changes.",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_requirements": [
+    "No rollback needed for dry-run; future MEDIUM actions need backup and Owner approval."
+  ],
+  "triggers": [
+    "external checker high-value performance signal",
+    "trend regression",
+    "Owner asks for review pack"
+  ]
+}

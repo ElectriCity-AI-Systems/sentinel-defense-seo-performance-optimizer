@@ -1,0 +1,59 @@
+{
+  "action_limits": {
+    "canary_max_actions_per_hour": 1,
+    "global_cooldown_minutes": 30,
+    "max_actions_per_day": 12,
+    "max_actions_per_hour": 3,
+    "max_failed_actions_per_hour": 2,
+    "max_identical_action_retries": 1
+  },
+  "activation_requires_all_gates": true,
+  "automatic_emergency_stop": true,
+  "autonomy_level": "LEVEL_2_GUARDED_AUTONOMY",
+  "canary_required": true,
+  "default_ttl_minutes": 30,
+  "health_targets": [
+    {
+      "expected_status": [
+        200,
+        301,
+        302
+      ],
+      "id": "public_homepage",
+      "method": "GET",
+      "required": true,
+      "tls_verify": true,
+      "url": "https://electri-c-ity-studios-24-7.com/"
+    },
+    {
+      "expected_status": [
+        200,
+        301,
+        302
+      ],
+      "id": "public_robots",
+      "method": "GET",
+      "required": true,
+      "tls_verify": true,
+      "url": "https://electri-c-ity-studios-24-7.com/robots.txt"
+    }
+  ],
+  "health_challenge_repetitions": 3,
+  "high_live_enabled": false,
+  "low_live_enabled": true,
+  "maximum_ttl_minutes": 240,
+  "medium_live_enabled": false,
+  "monitoring_enabled": true,
+  "owner_policy_approved": true,
+  "owner_policy_reference": "phase-10.19-owner-approval-2026-07-16",
+  "policy_version": 3,
+  "post_apply_validation_required": true,
+  "rollback_required": true,
+  "two_phase_commit_required": true,
+  "validation_schedule_seconds": [
+    0,
+    30,
+    120,
+    300
+  ]
+}

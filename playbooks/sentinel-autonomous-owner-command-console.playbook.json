@@ -1,0 +1,26 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "commands": [
+    "python3 sentinel_autonomy.py status",
+    "python3 sentinel_autonomy.py preflight",
+    "python3 sentinel_autonomy.py operation-governor-status",
+    "python3 sentinel_autonomy.py soak-status",
+    "python3 sentinel_autonomy.py readiness-seal",
+    "python3 sentinel_autonomy.py run-safe-once",
+    "python3 sentinel_autonomy.py run-safe-batch 3",
+    "python3 sentinel_autonomy.py soak-run 3",
+    "python3 sentinel_autonomy.py rc-status",
+    "python3 sentinel_autonomy.py rc-briefing",
+    "python3 sentinel_autonomy.py rc-evidence",
+    "python3 sentinel_autonomy.py rc-runbook"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-owner-command-console",
+  "phase": "10.10",
+  "schema_version": "sentinel-autonomous-release-candidate-10.10"
+}

@@ -1,0 +1,30 @@
+{
+  "name": "sentinel-staged-autonomy-activation",
+  "phase": "10.18",
+  "scheduler_verification": {
+    "minimum_consecutive_cycles": 3,
+    "low_live_apply_enabled": false,
+    "allowed_decisions": [
+      "NO_ACTION",
+      "ACTION_CANDIDATE_BLOCKED_BY_VERIFICATION_STAGE"
+    ]
+  },
+  "guarded_canary": {
+    "minimum_minutes": 60,
+    "maximum_active_actions": 1,
+    "maximum_ttl_minutes": 10,
+    "enabled_actions": [
+      "temporary_scanner_managed_challenge_v1",
+      "rollback_sentinel_owned_rule_v1"
+    ]
+  },
+  "level_2": {
+    "low_live_apply_enabled": true,
+    "medium_live_apply_enabled": false,
+    "high_live_apply_enabled": false,
+    "rollback_required": true,
+    "circuit_breaker_required": true
+  },
+  "time_gates_may_be_simulated": false,
+  "activation_on_failed_gate": false
+}

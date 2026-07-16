@@ -1,0 +1,80 @@
+{
+  "allowed_actions": [
+    "inspect_git_status",
+    "scan_text_files_for_secret_like_values",
+    "write_gitignore_safety_patterns",
+    "stage_allowlisted_text_files",
+    "commit_only_when_scan_is_clean",
+    "write_local_reports"
+  ],
+  "blocked_actions": [
+    "automatic_push",
+    "force_push",
+    "history_rewrite",
+    "destructive_clean",
+    "hard_reset",
+    "recursive_delete",
+    "staging_env_files",
+    "staging_backups_snapshots_or_audit_logs",
+    "staging_large_binary_artifacts"
+  ],
+  "name": "git-safety-checkpoint",
+  "output_reports": [
+    "reports/latest/git-safety-checkpoint.json",
+    "reports/latest/git-safety-checkpoint.md",
+    "reports/latest/git-push-readiness.md",
+    "state/adaptive-learning/git_safety_checkpoint.json"
+  ],
+  "owner_review_boundaries": [
+    "Review staged files before manual push.",
+    "Do not commit .sentinel-sftp.env or other env files.",
+    "Do not commit backups, snapshots, audit JSONL, or downloaded image artifacts."
+  ],
+  "purpose": "Prepare a local Git checkpoint without secrets, backups, audit logs, snapshots, or binary artifacts.",
+  "required_gitignore_patterns": [
+    ".sentinel-sftp.env",
+    ".env",
+    ".env.*",
+    "*.key",
+    "*.pem",
+    "*.p12",
+    "*.pfx",
+    "*.crt",
+    "*.sqlite",
+    "*.db",
+    "**pycache**/",
+    "*.pyc",
+    ".venv/",
+    "venv/",
+    "backups/",
+    "snapshots/",
+    "audit/",
+    "*.log",
+    "reports/latest/*secret*",
+    "reports/latest/*token*",
+    "state/*secret*",
+    "state/*token*",
+    "backups/medium-images-apply/",
+    "backups/medium-images-canary-recipe/",
+    "*.webp",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    "*.gif",
+    "*.zip",
+    "*.tar",
+    "*.tar.gz"
+  ],
+  "safe_stage_allowlist": [
+    "sentinel_*.py",
+    "deploy/systemd/*.service",
+    "deploy/systemd/*.timer",
+    "deploy/systemd/*.review.sh",
+    "playbooks/*.playbook.json",
+    "reports/latest/*.json",
+    "reports/latest/*.md",
+    "state/adaptive-learning/*.json",
+    "README.md",
+    "docs/*.md"
+  ]
+}

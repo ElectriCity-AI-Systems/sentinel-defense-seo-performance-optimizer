@@ -1,0 +1,18 @@
+{
+  "playbook_id": "sentinel-cloudflare-write-canary",
+  "phase": "10.19",
+  "purpose": "Verify fixed-scope Cloudflare write and rollback capability with a disabled Sentinel-owned rule.",
+  "fixed_identity": "sentinel-guarded-write-canary",
+  "fixed_action": "managed_challenge",
+  "enabled": false,
+  "workflow": [
+    "read_fixed_ruleset",
+    "create_disabled_fixed_rule",
+    "verify_exact_scope_and_hash",
+    "delete_exact_rule",
+    "verify_absence_and_restored_hash"
+  ],
+  "on_read_only_token": "block_low_live_but_allow_monitoring",
+  "on_deletion_failure": "emergency_stop_and_breach",
+  "credential_values_logged": false
+}

@@ -1,0 +1,41 @@
+{
+  "applies_changes": false,
+  "auto_allowed_risk": [
+    "DRAFT",
+    "LOW_EXPORT",
+    "LOW_LOCAL",
+    "LOW_STATE",
+    "READ_ONLY"
+  ],
+  "generated_at": "2026-07-03T15:11:50Z",
+  "low_live_executable": false,
+  "network_access": false,
+  "never_auto_risk": [
+    "HIGH",
+    "LOW_LIVE",
+    "MEDIUM"
+  ],
+  "playbook": "sentinel-autonomy-task-classification",
+  "read_only_core": true,
+  "schema_version": "self-governing-safe-autonomy-kernel-10.0",
+  "task_risk_class": {
+    "check_missing_inputs": "READ_ONLY",
+    "check_public_asset_safety": "READ_ONLY",
+    "generate_git_checkpoint_suggestion": "DRAFT",
+    "generate_next_safe_actions": "DRAFT",
+    "observe_project_state": "READ_ONLY",
+    "rebuild_manifest_and_checksums": "LOW_EXPORT",
+    "rebuild_payhip_upload_pack": "LOW_EXPORT",
+    "repair_capability_health_warning": "LOW_STATE",
+    "repair_invalid_json_output": "LOW_STATE",
+    "repair_missing_public_asset": "LOW_STATE",
+    "rerun_payhip_launch_qa": "LOW_STATE",
+    "run_first_order_dryrun": "LOW_STATE",
+    "update_fulfillment_board": "LOW_STATE",
+    "update_learning_state": "LOW_STATE",
+    "update_owner_summary": "LOW_STATE",
+    "update_service_proof": "LOW_STATE",
+    "write_audit_event": "LOW_STATE"
+  },
+  "uploads_anything": false
+}

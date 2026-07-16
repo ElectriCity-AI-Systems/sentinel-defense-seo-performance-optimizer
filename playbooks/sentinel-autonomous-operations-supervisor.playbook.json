@@ -1,0 +1,34 @@
+{
+  "allowed_apply_now": false,
+  "allowed_operations": [
+    "build_owner_briefing",
+    "run_capability_registry_refresh",
+    "run_goal_manager_cycle",
+    "run_health_governor_cycle",
+    "run_kernel_safe_cycle",
+    "run_mission_queue_runner",
+    "run_priority_engine_model",
+    "status_only",
+    "validate_system"
+  ],
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "external_api",
+    "remote_write",
+    "timer_install",
+    "HIGH_MEDIUM_LOW_LIVE_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "max_batch": 5,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-operations-supervisor",
+  "operation_governor_model": "state/adaptive-learning/autonomous_operation_governor_model.json",
+  "phase": "10.7",
+  "purpose": "Select and run the next safe local autonomy operation from a central control plane.",
+  "schema_version": "sentinel-autonomous-operations-supervisor-10.7"
+}

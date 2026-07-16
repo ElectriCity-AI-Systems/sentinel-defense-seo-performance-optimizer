@@ -1,0 +1,36 @@
+{
+  "name": "low-risk-seo-performance-monitor",
+  "purpose": "Read-only SEO and performance monitoring with local reporting and draft actions.",
+  "allowed_actions": [
+    "public_http_checks",
+    "seo_tag_checks",
+    "schema_counting",
+    "performance_header_checks",
+    "local_reports",
+    "local_history",
+    "draft_actions"
+  ],
+  "forbidden_actions": [
+    "live_apply",
+    "db_write",
+    "sftp_write",
+    "cache_purge",
+    "fse_template_edit",
+    "post_page_edit",
+    "theme_plugin_code_edit",
+    "htaccess_change",
+    "cloudflare_change",
+    "nginx_change"
+  ],
+  "command": "python3 sentinel_low_risk_autonomy.py --run-once",
+  "status_values": [
+    "LOW_RISK_AUTONOMY_OK",
+    "LOW_RISK_AUTONOMY_WARNINGS",
+    "LOW_RISK_AUTONOMY_CRITICAL_KNOWN_ISSUES",
+    "LOW_RISK_AUTONOMY_FAILED",
+    "LOW_RISK_AUTONOMY_BLOCKED_BY_SAFETY"
+  ],
+  "owner_review_boundary": "Medium and high risk actions are never executed by this runner.",
+  "rollback": "No remote changes are performed; rollback is not required for monitoring output.",
+  "breach": false
+}

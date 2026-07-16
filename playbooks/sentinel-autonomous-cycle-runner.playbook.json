@@ -45,5 +45,7 @@
   "max_cycles": 5,
   "name": "sentinel-autonomous-cycle-runner",
   "phase": "10.1",
+  "priority_engine_integration": "read model only; kernel still enforces allowlist and risk classification",
+  "priority_model_path": "state/adaptive-learning/autonomy_task_priority_model.json",
   "purpose": "Run multiple safe local kernel cycles with validation and learning after each cycle."
 }

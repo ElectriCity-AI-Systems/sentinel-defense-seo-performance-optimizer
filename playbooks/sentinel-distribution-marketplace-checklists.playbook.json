@@ -1,0 +1,18 @@
+{
+  "allowed_apply_now": false,
+  "api_access": "not_used",
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "marketplaces": [
+    "GitHub",
+    "Payhip",
+    "Gumroad"
+  ],
+  "medium_executable": false,
+  "name": "sentinel-distribution-marketplace-checklists",
+  "phase": "10.12",
+  "schema_version": "sentinel-distribution-release-pack-10.12"
+}

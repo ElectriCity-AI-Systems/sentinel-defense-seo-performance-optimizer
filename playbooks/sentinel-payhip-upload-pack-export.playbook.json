@@ -1,7 +1,7 @@
 {
   "applies_changes": false,
   "export_files_committed": false,
-  "generated_at": "2026-06-18T16:19:32Z",
+  "generated_at": "2026-07-03T15:12:20Z",
   "payhip_product_file": "01-service-access-instructions.pdf",
   "playbook": "sentinel-payhip-upload-pack-export",
   "read_only": true,

@@ -1,0 +1,24 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "decision_order": [
+    "breach stop",
+    "safety drift stop",
+    "operation governor selected operation when safe",
+    "health governor cycle",
+    "goal manager cycle",
+    "mission queue runner",
+    "priority model",
+    "capability registry",
+    "kernel fallback",
+    "owner briefing"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-operation-decision",
+  "phase": "10.7",
+  "schema_version": "sentinel-autonomous-operations-supervisor-10.7"
+}

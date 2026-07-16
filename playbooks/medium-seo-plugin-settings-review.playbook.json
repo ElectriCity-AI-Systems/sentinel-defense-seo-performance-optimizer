@@ -1,0 +1,60 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "count known candidates",
+    "write report",
+    "write snapshot",
+    "write audit",
+    "prepare owner review"
+  ],
+  "blocked_actions": [
+    "live apply",
+    "SFTP write",
+    "DB write",
+    "cache purge",
+    "Cloudflare change",
+    "Nginx change",
+    ".htaccess change",
+    "FSE/Post/Page/Theme/Plugin edit"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "unexpected apply mode",
+    "secret-like output",
+    "forbidden command pattern"
+  ],
+  "dry_run_only": true,
+  "healthcheck_plan": [
+    "title/meta compare",
+    "canonical compare",
+    "OG/Twitter compare",
+    "sitemap/robots read-only check"
+  ],
+  "inputs": [
+    "/srv/sentinel-defense/reports/latest/low-risk-autonomy.json",
+    "/srv/sentinel-defense/reports/latest/adaptive-recommendations.json",
+    "/srv/sentinel-defense/reports/latest/seo-safe-optimizer-report.json",
+    "/srv/sentinel-defense/reports/latest/performance-safe-audit-report.json",
+    "/srv/sentinel-defense/reports/latest/concrete-seo-performance-optimizer.json",
+    "/srv/sentinel-defense/reports/latest/sourcemap-prevention-report.json",
+    "/srv/sentinel-defense/reports/latest/wpo-cache-soc-marker-purge.json",
+    "/srv/sentinel-defense/reports/latest/ai-radio-api-timeout-diagnosis.json",
+    "/srv/sentinel-defense/reports/latest/ai-radio-nowplaying-microcache-status.json",
+    "/srv/sentinel-defense/reports/latest/sentinel-master-report.json"
+  ],
+  "name": "medium-seo-plugin-settings-dryrun",
+  "output_reports": [
+    "reports/latest/medium-dryrun-gates.json",
+    "reports/latest/medium-dryrun-gates.md"
+  ],
+  "owner_review_required": true,
+  "purpose": "Owner-approved MEDIUM dry-run gate for seo-plugin-settings; no live changes.",
+  "risk": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_requirements": [
+    "No rollback needed for dry-run; any future action requires backup and Owner approval."
+  ],
+  "triggers": [
+    "Owner requests dry-run",
+    "Adaptive recommendation references this gate"
+  ]
+}

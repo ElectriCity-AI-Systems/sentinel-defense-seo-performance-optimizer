@@ -1,0 +1,63 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "write owner-review pack",
+    "write healthcheck plan",
+    "write rollback plan",
+    "write audit"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "automatic production change",
+    "database write",
+    "remote file write",
+    "cache purge",
+    "CDN/security-rule change",
+    "webserver config change",
+    "access-rule file change",
+    "editor/template/post/page modification",
+    "theme or plugin code modification",
+    "script rewrite",
+    "player code change"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "REGRESSION",
+    "secret-like output",
+    "unexpected production change"
+  ],
+  "evidence": {
+    "external_resource_host_count": 44,
+    "internal_scripts_count": 24.0,
+    "large_inline_script_count": 2,
+    "script_tag_count": 32.0
+  },
+  "live_apply": false,
+  "manual_review_steps": [
+    "Create a script inventory grouped by source and purpose.",
+    "Separate critical player/radio/shop/ad/embed scripts from optional scripts.",
+    "Mark defer/lazy-load candidates for manual testing only.",
+    "Do not alter player or monetization behavior automatically."
+  ],
+  "name": "medium-scripts-optimization-review",
+  "owner_review_required": true,
+  "post_healthcheck": [
+    "HTTP status remains 200.",
+    "Player, radio, ads, analytics and embeds are manually checked.",
+    "No visible JavaScript failure is reported during manual browser review.",
+    "SEO tags and schema counts remain present."
+  ],
+  "pre_healthcheck": [
+    "Read-only HTTP status check returns 200.",
+    "Record current SEO score, performance score, schema health score and known issues.",
+    "Record current HTML bytes, script count, image count, cache headers and 5xx/504 context.",
+    "Confirm live_apply=false and write emergency stop remains active."
+  ],
+  "purpose": "Owner-review gate for scripts optimization planning.",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_plan": [
+    "Restore the prior script setting manually.",
+    "Re-enable any manually disabled script source.",
+    "Run read-only healthcheck and manual functional review after rollback."
+  ]
+}

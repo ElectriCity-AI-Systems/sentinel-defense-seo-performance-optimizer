@@ -1,0 +1,29 @@
+{
+  "allowed_actions": [
+    "read reports",
+    "download exact backup",
+    "run healthchecks",
+    "document safe abort"
+  ],
+  "allowed_gate": "images",
+  "backup_before_any_apply": true,
+  "blocked_actions": [
+    "non-images apply",
+    "DB/FSE/Post/Page/Theme/Plugin changes",
+    "Cloudflare/Nginx/htaccess changes"
+  ],
+  "blocked_gates": [
+    "html-size",
+    "inline-css",
+    "scripts",
+    "cache-expires"
+  ],
+  "canary_first_required": true,
+  "gate": "images",
+  "global_live_autonomy": false,
+  "healthcheck_before_and_after": true,
+  "name": "medium-images-apply-execution",
+  "phase": "8.10",
+  "requires_owner_execution_decision": true,
+  "scope": "minimal_image_metadata_or_safe_local_plan"
+}

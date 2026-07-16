@@ -1,0 +1,26 @@
+{
+  "allowed_actions": [
+    "local WebP optimization",
+    "exact-path upload only after all checks",
+    "local reports"
+  ],
+  "allowed_remote_path": "/wordpress/wp-content/uploads/2023/08/Acid-Love-Cover-Art-1-2.webp",
+  "backup_sha256_required": "f6ab58160164e10969a13385c26de5185239cca920e4722f5c5225cb7586936f",
+  "blocked_actions": [
+    "other gates",
+    "database writes",
+    "content/template/code changes",
+    "cache purge"
+  ],
+  "blocked_gates": [
+    "html-size",
+    "inline-css",
+    "scripts",
+    "cache-expires"
+  ],
+  "gate": "images",
+  "global_live_autonomy": false,
+  "minimum_savings_percent": 3.0,
+  "name": "medium-images-canary-recipe",
+  "phase": "8.11"
+}

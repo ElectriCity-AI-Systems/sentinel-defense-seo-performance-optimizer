@@ -1,0 +1,18 @@
+{
+  "applies_changes": false,
+  "decision": "READY",
+  "dry_run_only": true,
+  "generated_at": "2026-07-03T15:12:11Z",
+  "playbook": "sentinel-payhip-first-order-dryrun",
+  "read_only": true,
+  "schema_version": "payhip-first-order-dryrun-9.8",
+  "status": "FIRST_ORDER_DRYRUN_READY",
+  "steps": [
+    "Build a dummy case with placeholders (example.com only).",
+    "Simulate intake, scope and risk review.",
+    "Simulate all three package workflows.",
+    "Generate a sample client report and delivery pack.",
+    "Emit the QA decision and real-order manual steps."
+  ],
+  "uploads_anything": false
+}

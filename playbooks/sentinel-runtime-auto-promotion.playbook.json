@@ -1,0 +1,23 @@
+{
+  "playbook_id": "sentinel-runtime-auto-promotion",
+  "phase": "10.19",
+  "purpose": "Promote the existing guarded runtime from canary to active only after real time and cycle evidence.",
+  "minimum_observation_minutes": 60,
+  "minimum_successful_cycles": 20,
+  "required_zero_counts": [
+    "failed_actions",
+    "failed_rollbacks",
+    "health_regressions",
+    "new_526_growth",
+    "policy_drift",
+    "audit_errors",
+    "unexpected_write_paths"
+  ],
+  "enabled_low_live_classes": [
+    "temporary_high_confidence_scanner_challenge",
+    "sentinel_owned_rule_rollback"
+  ],
+  "medium_enabled": false,
+  "high_enabled": false,
+  "time_simulation_allowed": false
+}

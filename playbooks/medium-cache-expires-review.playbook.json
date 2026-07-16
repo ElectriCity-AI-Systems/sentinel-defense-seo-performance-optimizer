@@ -1,0 +1,63 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "write owner-review pack",
+    "write healthcheck plan",
+    "write rollback plan",
+    "write audit"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "automatic production change",
+    "database write",
+    "remote file write",
+    "cache purge",
+    "CDN/security-rule change",
+    "webserver config change",
+    "access-rule file change",
+    "editor/template/post/page modification",
+    "theme or plugin code modification",
+    "header rule deployment"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "REGRESSION",
+    "secret-like output",
+    "unexpected production change"
+  ],
+  "evidence": {
+    "cache_control": "no-cache",
+    "cf_cache_status": "HIT",
+    "expires_tag_missing": true,
+    "global_p90_latency_ms": 432.0,
+    "global_p90_ttfb_ms": 266.0
+  },
+  "live_apply": false,
+  "manual_review_steps": [
+    "Separate HTML caching signals from static asset caching signals.",
+    "Compare cache headers across several read-only runs.",
+    "Prepare a narrow owner-reviewed header strategy only if repeated evidence supports it.",
+    "Do not create broad security, CDN, or webserver changes from this gate."
+  ],
+  "name": "medium-cache-expires-optimization-review",
+  "owner_review_required": true,
+  "post_healthcheck": [
+    "HTTP status remains 200.",
+    "No 5xx/504 increase after any future owner-approved change.",
+    "No stale homepage HTML is served.",
+    "HIT/MISS/REVALIDATED states are interpreted separately by resource type."
+  ],
+  "pre_healthcheck": [
+    "Read-only HTTP status check returns 200.",
+    "Record current SEO score, performance score, schema health score and known issues.",
+    "Record current HTML bytes, script count, image count, cache headers and 5xx/504 context.",
+    "Confirm live_apply=false and write emergency stop remains active."
+  ],
+  "purpose": "Owner-review gate for cache-expires optimization planning.",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_plan": [
+    "Manually revert the owner-approved cache/header rule.",
+    "Recheck public HTML freshness and cache headers.",
+    "Keep read-only monitoring active; do not purge automatically."
+  ]
+}

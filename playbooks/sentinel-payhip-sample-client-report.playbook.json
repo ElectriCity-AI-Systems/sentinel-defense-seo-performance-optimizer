@@ -1,0 +1,21 @@
+{
+  "applies_changes": false,
+  "disclaimer": "This is a sample report using placeholder data only. It is not a real audit.",
+  "generated_at": "2026-07-03T15:12:11Z",
+  "playbook": "sentinel-payhip-sample-client-report",
+  "read_only": true,
+  "schema_version": "payhip-first-order-dryrun-9.8",
+  "sections": [
+    "Executive Summary",
+    "Website Context Placeholder",
+    "SEO Findings Placeholder",
+    "Performance Findings Placeholder",
+    "Security / Cloudflare Findings Placeholder",
+    "Risk Classification",
+    "Safe Recommendations",
+    "Owner Review Items",
+    "Blocked High-Risk Items",
+    "Next Safe Steps",
+    "Disclaimer"
+  ]
+}

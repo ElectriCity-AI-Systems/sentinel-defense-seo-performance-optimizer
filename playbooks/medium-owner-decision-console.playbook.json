@@ -1,0 +1,46 @@
+{
+  "allowed_actions": [
+    "list gates",
+    "show gate details",
+    "store local decision",
+    "write reports",
+    "write audit",
+    "update bot learning"
+  ],
+  "allowed_decisions": [
+    "pending_review",
+    "approved_for_dry_run_only",
+    "needs_more_review",
+    "rejected",
+    "blocked"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "live apply",
+    "production change",
+    "remote write",
+    "database write",
+    "cache purge",
+    "CDN/security change",
+    "webserver config change",
+    "content/code edit",
+    "service activation",
+    "cron install"
+  ],
+  "live_apply": false,
+  "name": "medium-owner-decision-console",
+  "next_allowed_stage": {
+    "approved_for_dry_run_only": "dry_run_simulation_only",
+    "blocked": "blocked",
+    "needs_more_review": "manual_review_required",
+    "pending_review": "owner_review",
+    "rejected": "no_action"
+  },
+  "outputs": [
+    "/srv/sentinel-defense/reports/latest/medium-owner-decision-console.json",
+    "/srv/sentinel-defense/state/adaptive-learning/medium_owner_decisions.json",
+    "/srv/sentinel-defense/state/adaptive-learning/medium_owner_decisions_history.jsonl"
+  ],
+  "purpose": "Store Owner decisions for MEDIUM optimization gates without applying changes.",
+  "safety_rule": "approved_for_dry_run_only permits only future dry-run/simulation, never apply."
+}

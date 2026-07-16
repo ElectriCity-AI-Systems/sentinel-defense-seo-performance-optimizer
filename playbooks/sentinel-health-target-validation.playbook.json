@@ -1,0 +1,28 @@
+{
+  "name": "sentinel-health-target-validation",
+  "phase": "10.18",
+  "targets_are_policy_fixed": true,
+  "targets": [
+    {
+      "id": "public_homepage",
+      "path": "/",
+      "method": "GET",
+      "expected_status": [200, 301, 302],
+      "required": true
+    },
+    {
+      "id": "public_robots",
+      "path": "/robots.txt",
+      "method": "GET",
+      "expected_status": [200, 301, 302],
+      "required": true
+    }
+  ],
+  "https_required": true,
+  "tls_verification_required": true,
+  "maximum_redirects": 5,
+  "cross_host_redirects_allowed": false,
+  "credentials_in_url_allowed": false,
+  "challenge_page_counts_as_healthy": false,
+  "response_body_persisted": false
+}

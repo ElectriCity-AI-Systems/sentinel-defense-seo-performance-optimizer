@@ -1,0 +1,21 @@
+{
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "remote_push",
+    "git_tag",
+    "marketplace_api",
+    "live_apply",
+    "timer_install",
+    "LOW_LIVE_MEDIUM_HIGH_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-manual-publication-handoff",
+  "phase": "10.15",
+  "purpose": "Build local sanitized manual publication handoff files.",
+  "schema_version": "sentinel-manual-publication-handoff-10.15"
+}

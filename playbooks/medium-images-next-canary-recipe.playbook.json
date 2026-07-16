@@ -1,0 +1,44 @@
+{
+  "blocked_now": true,
+  "live_apply": false,
+  "name": "medium-images-next-canary-recipe",
+  "phase": "future",
+  "purpose": "Template for the next separate canary recipe phase.",
+  "required_before_upload": [
+    "owner decision",
+    "backup",
+    "tooling",
+    "local optimization",
+    "pre-healthcheck",
+    "minimum 3 percent savings",
+    "rollback plan"
+  ],
+  "selected_candidate": {
+    "blocked": false,
+    "blocked_reason": "",
+    "estimated_savings_high": 11554,
+    "estimated_savings_low": 3466,
+    "format": "webp",
+    "http_probe": {
+      "content_type": "image/webp",
+      "http_status": 200,
+      "method": "HEAD",
+      "ok": true,
+      "size_bytes": 115536
+    },
+    "is_previous_failed_candidate": false,
+    "likely_position": "below_the_fold_or_standard",
+    "rank_score": 142.207,
+    "remote_path": "/wordpress/wp-content/uploads/2025/11/Bildschirmfoto-vom-2025-11-26-15-21-16-1-scaled.webp",
+    "risk": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+    "selected_candidate": true,
+    "size_bytes": 115536,
+    "source_type": "internal",
+    "sources": [
+      "dryrun_report",
+      "dryrun_state",
+      "live_html"
+    ],
+    "url": "https://electri-c-ity-studios-24-7.com/wp-content/uploads/2025/11/Bildschirmfoto-vom-2025-11-26-15-21-16-1-scaled.webp"
+  }
+}

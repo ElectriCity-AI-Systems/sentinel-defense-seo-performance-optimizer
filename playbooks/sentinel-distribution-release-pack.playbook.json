@@ -1,0 +1,21 @@
+{
+  "allowed_apply_now": false,
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "timer_install",
+    "marketplace_api",
+    "LOW_LIVE_MEDIUM_HIGH_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-distribution-release-pack",
+  "phase": "10.12",
+  "purpose": "Build sanitized local distribution release docs and validation artifacts.",
+  "schema_version": "sentinel-distribution-release-pack-10.12"
+}

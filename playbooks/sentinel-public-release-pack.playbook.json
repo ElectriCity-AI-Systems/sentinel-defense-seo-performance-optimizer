@@ -1,0 +1,26 @@
+{
+  "allowed_apply_now": false,
+  "allowed_outputs": [
+    "docs/public-release",
+    "playbooks",
+    "local reports",
+    "adaptive state"
+  ],
+  "blocked_actions": [
+    "live_apply",
+    "network",
+    "remote_write",
+    "timer_install",
+    "LOW_LIVE_MEDIUM_HIGH_execution"
+  ],
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-public-release-pack",
+  "phase": "10.11",
+  "purpose": "Build sanitized public documentation and commercial copy from a validated local release candidate.",
+  "schema_version": "sentinel-public-release-pack-10.11"
+}

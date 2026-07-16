@@ -42,12 +42,38 @@ COMMANDS = {
     "release-final-status": ["python3", "sentinel_license_decision_finalizer.py", "--validate-final-release"],
     "release-draft": ["python3", "sentinel_license_decision_finalizer.py", "--build-final-github-release-draft"],
     "manual-publication-checklist": ["python3", "sentinel_license_decision_finalizer.py", "--validate-final-release"],
+    "publication-handoff-status": ["python3", "sentinel_manual_publication_handoff.py", "--status"],
+    "readme-candidate": ["python3", "sentinel_manual_publication_handoff.py", "--build-readme-candidate"],
+    "license-candidate": ["python3", "sentinel_manual_publication_handoff.py", "--build-license-candidate"],
+    "owner-go-no-go": ["python3", "sentinel_manual_publication_handoff.py", "--build-owner-go-no-go"],
+    "no-action-proof": ["python3", "sentinel_manual_publication_handoff.py", "--build-no-action-proof"],
+    "guarded-status": ["python3", "sentinel_guarded_autonomy.py", "--status"],
+    "guarded-preflight": ["python3", "sentinel_guarded_autonomy.py", "--preflight"],
+    "guarded-actions": ["python3", "sentinel_guarded_autonomy.py", "--list-actions"],
+    "guarded-audit": ["python3", "sentinel_guarded_autonomy.py", "--audit-summary"],
+    "guarded-pause": ["python3", "sentinel_guarded_autonomy.py", "--pause"],
+    "guarded-resume": ["python3", "sentinel_guarded_autonomy.py", "--resume"],
+    "guarded-emergency-stop": ["python3", "sentinel_guarded_autonomy.py", "--emergency-stop"],
+    "activation-gates": ["python3", "sentinel_guarded_activation.py", "--collect-gates"],
+    "health-baseline": ["python3", "sentinel_guarded_activation.py", "--build-health-baseline"],
+    "tls-gate": ["python3", "sentinel_guarded_activation.py", "--evaluate-tls-gate"],
+    "scheduler-verification": ["python3", "sentinel_guarded_activation.py", "--verify-scheduler-cycles"],
+    "guarded-go-live-status": ["python3", "sentinel_guarded_activation.py", "--status"],
+    "runtime-health": ["python3", "sentinel_guarded_runtime_activation.py", "--evaluate-health"],
+    "runtime-tls": ["python3", "sentinel_guarded_runtime_activation.py", "--evaluate-tls"],
+    "runtime-systemd": ["python3", "sentinel_guarded_runtime_activation.py", "--select-systemd-mode"],
+    "runtime-monitoring": ["python3", "sentinel_guarded_runtime_activation.py", "--activate-monitoring"],
+    "runtime-write-canary": ["python3", "sentinel_guarded_runtime_activation.py", "--probe-write-canary"],
+    "runtime-level": ["python3", "sentinel_guarded_runtime_activation.py", "--status"],
 }
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Safe local Sentinel autonomy wrapper")
-    parser.add_argument("command", choices=["status", "preflight", "run-safe-once", "run-safe-batch", "briefing", "operation-governor-status", "soak-status", "soak-run", "readiness-seal", "rc-status", "rc-briefing", "rc-evidence", "rc-runbook", "public-release-status", "public-summary", "sales-copy", "github-release-notes", "distribution-status", "release-checklist", "changelog", "marketplace-checklist", "license-status", "license-options", "release-final-status", "release-draft", "manual-publication-checklist"])
+    parser.add_argument(
+        "command",
+        choices=sorted([*COMMANDS, "run-safe-batch", "soak-run"]),
+    )
     parser.add_argument("count", nargs="?")
     args = parser.parse_args(argv)
 

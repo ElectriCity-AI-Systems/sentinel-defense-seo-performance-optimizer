@@ -1,0 +1,19 @@
+{
+  "allowed_gate": "images",
+  "backup_before_any_apply": true,
+  "blocked_gates": [
+    "html-size",
+    "inline-css",
+    "scripts",
+    "cache-expires"
+  ],
+  "degraded_blocks_further_automation": true,
+  "gate": "images",
+  "global_live_autonomy": false,
+  "healthcheck_before_and_after": true,
+  "name": "medium-images-post-apply-validation",
+  "phase": "8.10",
+  "requires_owner_execution_decision": true,
+  "scope": "minimal_image_metadata_or_safe_local_plan",
+  "validation_status": "VALIDATION_OK"
+}

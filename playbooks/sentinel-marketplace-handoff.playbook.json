@@ -1,0 +1,13 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-marketplace-handoff",
+  "phase": "10.15",
+  "purpose": "Create manual Payhip and Gumroad handoff docs without API upload.",
+  "schema_version": "sentinel-manual-publication-handoff-10.15"
+}

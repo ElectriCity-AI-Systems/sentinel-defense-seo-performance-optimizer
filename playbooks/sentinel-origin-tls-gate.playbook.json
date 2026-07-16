@@ -1,0 +1,23 @@
+{
+  "name": "sentinel-origin-tls-gate",
+  "phase": "10.18",
+  "statuses": [
+    "TLS_GATE_RED",
+    "TLS_GATE_YELLOW",
+    "TLS_GATE_GREEN",
+    "TLS_GATE_GREEN_WITH_STALE_HISTORY"
+  ],
+  "green_with_stale_history_requires": {
+    "fixed_health_targets_pass": true,
+    "tls_verification_pass": true,
+    "delta_526": 0,
+    "minimum_consecutive_snapshots_without_growth": 3,
+    "minimum_observation_minutes": 60,
+    "direct_tls_failure_evidence": false,
+    "ssl_downgrade_recommended": false
+  },
+  "pause_new_live_actions_on_growth": true,
+  "automatic_certificate_change": false,
+  "ssl_downgrade_allowed": false,
+  "dns_change_allowed": false
+}

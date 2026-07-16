@@ -1,7 +1,7 @@
 {
   "applies_changes": false,
   "decision": "READY",
-  "generated_at": "2026-06-18T16:41:59Z",
+  "generated_at": "2026-07-03T15:11:54Z",
   "playbook": "sentinel-payhip-launch-qa",
   "read_only": true,
   "schema_version": "payhip-launch-qa-finalizer-9.6",

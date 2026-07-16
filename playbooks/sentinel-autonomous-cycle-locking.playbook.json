@@ -26,5 +26,6 @@
   "max_cycles": 5,
   "name": "sentinel-autonomous-cycle-locking",
   "phase": "10.1",
+  "priority_model_path": "state/adaptive-learning/autonomy_task_priority_model.json",
   "stale_after_hours": 6
 }

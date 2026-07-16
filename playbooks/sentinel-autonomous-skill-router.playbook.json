@@ -16,5 +16,5 @@
     "blocked_patterns"
   ],
   "schema_version": "sentinel-autonomous-capability-registry-10.3",
-  "selected_capability": "payhip_upload_pack_export"
+  "selected_capability": "autonomy_kernel"
 }

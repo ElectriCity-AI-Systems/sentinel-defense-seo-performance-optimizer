@@ -1,0 +1,60 @@
+{
+  "allowed_actions": [
+    "read local CSV",
+    "validate rows",
+    "compute metrics",
+    "write reports",
+    "write state",
+    "write audit",
+    "write snapshots",
+    "update bot learning"
+  ],
+  "blocked_actions": [
+    "live apply",
+    "SFTP write",
+    "DB write",
+    "cache purge",
+    "Cloudflare change",
+    "Nginx change",
+    ".htaccess change",
+    "systemctl/crontab changes"
+  ],
+  "input_csv_schema": [
+    "Region Code",
+    "Location",
+    "Provider",
+    "Latency (ms)",
+    "Status",
+    "DNS (ms)",
+    "Connect (ms)",
+    "TLS (ms)",
+    "TTFB (ms)",
+    "Transfer (ms)"
+  ],
+  "name": "global-performance-checker-ingest",
+  "output_reports": [
+    "/srv/sentinel-defense/reports/latest/global-checker-ingest.json",
+    "/srv/sentinel-defense/reports/latest/global-checker-recommendations.json",
+    "/srv/sentinel-defense/playbooks/global-performance-checker-ingest.playbook.json"
+  ],
+  "owner_review_boundaries": [
+    "No WAF/CDN/DNS/Nginx action from one CSV",
+    "MEDIUM/HIGH recommendations require Owner review"
+  ],
+  "purpose": "Ingest local global performance checker CSV and learn geography-dependent reachability/performance patterns.",
+  "risk_classification": {
+    "cdn_dns_origin_tuning": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+    "cloudflare_nginx_dns_migration": "HIGH_RISK_MANUAL_REVIEW_REQUIRED",
+    "ingestion": "LOW_RISK_AUTO_ALLOWED"
+  },
+  "thresholds": {
+    "dns_watch_ms": 150,
+    "p90_latency_warning_ms": 500,
+    "p90_ttfb_warning_ms": 300
+  },
+  "trend_logic": [
+    "single snapshot is not proof of outage",
+    "compare repeated CSV snapshots",
+    "separate far-region latency from availability failure"
+  ]
+}

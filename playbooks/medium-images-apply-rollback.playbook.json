@@ -1,0 +1,19 @@
+{
+  "allowed_gate": "images",
+  "backup_before_any_apply": true,
+  "blocked_gates": [
+    "html-size",
+    "inline-css",
+    "scripts",
+    "cache-expires"
+  ],
+  "gate": "images",
+  "global_live_autonomy": false,
+  "healthcheck_before_and_after": true,
+  "name": "medium-images-apply-rollback",
+  "phase": "8.10",
+  "requires_owner_execution_decision": true,
+  "rollback_only_if_apply_executed": true,
+  "rollback_status": "ROLLBACK_NOT_REQUIRED_NO_APPLY",
+  "scope": "minimal_image_metadata_or_safe_local_plan"
+}

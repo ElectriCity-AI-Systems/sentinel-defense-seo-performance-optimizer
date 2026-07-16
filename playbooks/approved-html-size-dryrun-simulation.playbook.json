@@ -1,0 +1,36 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "read public HTML",
+    "estimate savings",
+    "write reports",
+    "write audit",
+    "update learning"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "production change",
+    "remote write",
+    "database write",
+    "cache purge",
+    "file edit",
+    "content edit",
+    "service activation"
+  ],
+  "healthcheck": [
+    "HTTP status remains 200.",
+    "No 5xx increase is observed in the next read-only monitor run.",
+    "Title, meta description, H1 and canonical remain present unless Owner explicitly changed them.",
+    "Player, radio, shop and ads are visually checked by Owner.",
+    "Image count is not unexpectedly zero.",
+    "HTML bytes and transfer bytes do not increase.",
+    "breach remains false."
+  ],
+  "live_apply": false,
+  "name": "approved-html-size-dryrun-simulation",
+  "owner_decision_required": "approved_for_dry_run_only",
+  "purpose": "Read-only simulation for Owner-approved html-size MEDIUM gate.",
+  "risk": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_model": "Previous WordPress/FSE/page content must be restored manually if a later owner-approved edit regresses.",
+  "simulation_status": "SIMULATION_READY"
+}

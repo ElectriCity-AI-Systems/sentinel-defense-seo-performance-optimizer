@@ -1,0 +1,63 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "write owner-review pack",
+    "write healthcheck plan",
+    "write rollback plan",
+    "write audit"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "automatic production change",
+    "database write",
+    "remote file write",
+    "cache purge",
+    "CDN/security-rule change",
+    "webserver config change",
+    "access-rule file change",
+    "editor/template/post/page modification",
+    "theme or plugin code modification",
+    "content rewrite"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "REGRESSION",
+    "secret-like output",
+    "unexpected production change"
+  ],
+  "evidence": {
+    "html_bytes": 180795.0,
+    "image_bytes": 820224.0,
+    "inline_css_count": 154.0,
+    "script_tag_count": 32.0,
+    "total_transfer_bytes": 1008183.0
+  },
+  "live_apply": false,
+  "manual_review_steps": [
+    "Split HTML payload into image, script, inline-style and generated-content drivers.",
+    "Review embed, ad, gallery, player and repeated-block sections manually.",
+    "Create a manual reduction candidate list without editing content.",
+    "Keep FSE, post and page edits outside automation."
+  ],
+  "name": "medium-html-size-optimization-review",
+  "owner_review_required": true,
+  "post_healthcheck": [
+    "HTTP status remains 200.",
+    "SEO title, meta description, canonical, H1 and social tags remain present.",
+    "Player, radio, shop and ads remain functional after any future owner-approved edit.",
+    "HTML size decreases or stays stable without worsening schema duplicate state."
+  ],
+  "pre_healthcheck": [
+    "Read-only HTTP status check returns 200.",
+    "Record current SEO score, performance score, schema health score and known issues.",
+    "Record current HTML bytes, script count, image count, cache headers and 5xx/504 context.",
+    "Confirm live_apply=false and write emergency stop remains active."
+  ],
+  "purpose": "Owner-review gate for html-size optimization planning.",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_plan": [
+    "Restore previous page/editor/template content manually from saved copy.",
+    "Re-run read-only SEO and performance checks.",
+    "If score or function regresses, mark this gate blocked pending review."
+  ]
+}

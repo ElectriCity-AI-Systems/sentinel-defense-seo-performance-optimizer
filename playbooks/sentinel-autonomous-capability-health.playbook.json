@@ -10,7 +10,7 @@
     "json_valid",
     "guard_status"
   ],
-  "health_status": "CAPABILITY_HEALTH_WARNINGS",
+  "health_status": "CAPABILITY_HEALTH_OK",
   "high_blocked": true,
   "live_apply": false,
   "low_live_executable": false,

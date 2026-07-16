@@ -1,0 +1,65 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "write owner-review pack",
+    "write healthcheck plan",
+    "write rollback plan",
+    "write audit"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "automatic production change",
+    "database write",
+    "remote file write",
+    "cache purge",
+    "CDN/security-rule change",
+    "webserver config change",
+    "access-rule file change",
+    "editor/template/post/page modification",
+    "theme or plugin code modification",
+    "style rewrite"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "REGRESSION",
+    "secret-like output",
+    "unexpected production change"
+  ],
+  "evidence": {
+    "inline_css_count": 154.0,
+    "likely_sources": [
+      "WordPress blocks",
+      "FSE output",
+      "plugin output"
+    ],
+    "stylesheet_count": 2.0
+  },
+  "live_apply": false,
+  "manual_review_steps": [
+    "Group repeated inline style patterns from read-only HTML snapshots.",
+    "Classify likely source as block, template, editor content or plugin output.",
+    "Prefer setting-level cleanup over code edits if a safe owner-approved path exists.",
+    "Do not touch editor/template output without separate owner review."
+  ],
+  "name": "medium-inline-css-optimization-review",
+  "owner_review_required": true,
+  "post_healthcheck": [
+    "HTTP status remains 200.",
+    "Primary layout is visible and not shifted.",
+    "H1, title, meta description and canonical remain present.",
+    "JSON-LD count and known schema state do not worsen."
+  ],
+  "pre_healthcheck": [
+    "Read-only HTTP status check returns 200.",
+    "Record current SEO score, performance score, schema health score and known issues.",
+    "Record current HTML bytes, script count, image count, cache headers and 5xx/504 context.",
+    "Confirm live_apply=false and write emergency stop remains active."
+  ],
+  "purpose": "Owner-review gate for inline-css optimization planning.",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_plan": [
+    "Restore prior block/template/editor state manually from saved copy.",
+    "Re-run read-only HTML and SEO checks.",
+    "Mark the gate blocked if layout or SEO signals degrade."
+  ]
+}

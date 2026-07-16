@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "checks": [
+    "phase 10 json valid",
+    "no secrets",
+    "no network imports",
+    "no shell true",
+    "no high medium low live execution",
+    "safe defaults unchanged"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-system-validation",
+  "phase": "10.7",
+  "schema_version": "sentinel-autonomous-operations-supervisor-10.7"
+}

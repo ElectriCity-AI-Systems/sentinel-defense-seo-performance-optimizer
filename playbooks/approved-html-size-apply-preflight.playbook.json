@@ -1,0 +1,53 @@
+{
+  "abort_conditions": [
+    "Abort if a required backup is missing.",
+    "Abort if healthcheck baseline cannot be captured.",
+    "Abort if any upstream breach is true.",
+    "Abort if a planned change requires DB, remote write, Cloudflare, Nginx, htaccess, theme or plugin modification outside the later approved scope.",
+    "Abort if Owner approval is anything other than the future approved_for_apply_preparation decision.",
+    "Abort if the exact FSE/Page block cannot be identified for a minimal manual change."
+  ],
+  "allowed_actions": [
+    "read local simulation reports",
+    "read healthcheck and rollback plans",
+    "write local preflight reports",
+    "write local audit and snapshot records",
+    "update bot learning"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "production website changes",
+    "remote writes",
+    "database writes",
+    "cache purge",
+    "Cloudflare or Nginx or htaccess changes",
+    "FSE or page or theme or plugin edits",
+    "image or HTML file changes"
+  ],
+  "current_preflight_status": "APPLY_PREFLIGHT_READY_FOR_OWNER_REVIEW",
+  "gate_id": "html-size",
+  "healthcheck_sequence": [
+    "Pre: latest read-only monitor report shows HTTP 200.",
+    "Pre: title, meta description, canonical and H1 are recorded.",
+    "Pre: JSON-LD count and SOC known-issue status are recorded.",
+    "Pre: current image count, HTML bytes, transfer bytes and TTFB are recorded.",
+    "Post: HTTP remains 200 and no new 5xx growth is observed.",
+    "Post: SEO essentials remain present unless Owner intentionally changes them.",
+    "Post: player, radio, shop and ads receive manual visual review.",
+    "Post: breach remains false and live_apply remains false.",
+    "Post: HTML bytes do not increase versus pre-check.",
+    "Post: FSE/page structure is manually compared against the previous page."
+  ],
+  "live_apply": false,
+  "name": "approved-html-size-apply-preflight",
+  "phase": "8.9",
+  "purpose": "Check requirements for a future Owner-approved apply-preparation gate without changing production.",
+  "required_owner_decision_before_later_preparation": "approved_for_apply_preparation",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_requirements": [
+    "Rollback required if page layout, player, shop, ads or navigation breaks.",
+    "Rollback required if SEO essentials disappear unexpectedly.",
+    "Rollback required if HTTP status changes away from 200 or 5xx grows.",
+    "Rollback uses the previous WordPress/FSE/Page content kept by the Owner."
+  ]
+}

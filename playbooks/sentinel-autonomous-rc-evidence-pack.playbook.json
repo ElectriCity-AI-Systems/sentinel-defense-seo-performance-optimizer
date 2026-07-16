@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-rc-evidence-pack",
+  "phase": "10.10",
+  "schema_version": "sentinel-autonomous-release-candidate-10.10",
+  "sections": [
+    "readiness",
+    "soak",
+    "regression",
+    "safety",
+    "git",
+    "public summary"
+  ]
+}

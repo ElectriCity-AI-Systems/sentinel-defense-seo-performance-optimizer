@@ -1,0 +1,26 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "fields": [
+    "system status",
+    "selected operation",
+    "why selected",
+    "modules executed",
+    "missions completed",
+    "capabilities used",
+    "validation",
+    "repairs",
+    "learning",
+    "stop reason",
+    "next safe operation",
+    "blocked areas"
+  ],
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-autonomous-owner-briefing",
+  "phase": "10.7",
+  "schema_version": "sentinel-autonomous-operations-supervisor-10.7"
+}

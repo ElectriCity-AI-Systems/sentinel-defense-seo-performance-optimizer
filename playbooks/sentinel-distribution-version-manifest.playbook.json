@@ -1,0 +1,14 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-distribution-version-manifest",
+  "phase": "10.12",
+  "publishing": "manual_owner_action_only",
+  "schema_version": "sentinel-distribution-release-pack-10.12",
+  "semver_suggestion": "v1.0.0-rc1"
+}

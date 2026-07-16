@@ -1,0 +1,64 @@
+{
+  "allowed_actions": [
+    "read local reports",
+    "write owner-review pack",
+    "write healthcheck plan",
+    "write rollback plan",
+    "write audit"
+  ],
+  "apply_status": "not_applied",
+  "blocked_actions": [
+    "automatic production change",
+    "database write",
+    "remote file write",
+    "cache purge",
+    "CDN/security-rule change",
+    "webserver config change",
+    "access-rule file change",
+    "editor/template/post/page modification",
+    "theme or plugin code modification",
+    "image conversion",
+    "media upload"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "REGRESSION",
+    "secret-like output",
+    "unexpected production change"
+  ],
+  "evidence": {
+    "image_bytes": 820224.0,
+    "image_count": 13.0,
+    "lazy_image_count": 12.0,
+    "webp_hint_count": 44.0
+  },
+  "live_apply": false,
+  "manual_review_steps": [
+    "Identify hero, cover-art, shop, player and radio visuals from the page source or media library.",
+    "Sort candidates by visual importance and likely byte size.",
+    "Prepare alternate compressed image variants manually and compare visual quality.",
+    "Confirm above-the-fold image handling before considering any future owner-approved change."
+  ],
+  "name": "medium-images-optimization-review",
+  "owner_review_required": true,
+  "post_healthcheck": [
+    "HTTP status remains 200.",
+    "Image count is not accidentally zero.",
+    "Layout remains visually intact on desktop and mobile.",
+    "HTML bytes decrease or stay stable.",
+    "Known schema issue does not worsen."
+  ],
+  "pre_healthcheck": [
+    "Read-only HTTP status check returns 200.",
+    "Record current SEO score, performance score, schema health score and known issues.",
+    "Record current HTML bytes, script count, image count, cache headers and 5xx/504 context.",
+    "Confirm live_apply=false and write emergency stop remains active."
+  ],
+  "purpose": "Owner-review gate for images optimization planning.",
+  "risk_level": "MEDIUM_REQUIRES_OWNER_APPROVAL",
+  "rollback_plan": [
+    "Restore original image or media-library item from backup.",
+    "Revert any manual image reference changed during owner-approved work.",
+    "Run read-only SEO/performance healthcheck after rollback."
+  ]
+}

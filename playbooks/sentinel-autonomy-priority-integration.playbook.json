@@ -14,6 +14,7 @@
     "repair_missing_public_asset",
     "repair_invalid_json_output",
     "rebuild_manifest_and_checksums",
+    "repair_capability_health_warning",
     "update_learning_state",
     "write_audit_event",
     "generate_git_checkpoint_suggestion"

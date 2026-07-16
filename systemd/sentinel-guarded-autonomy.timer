@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Sentinel Guarded Autonomy every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=false
+Unit=sentinel-guarded-autonomy.service
+
+[Install]
+WantedBy=timers.target

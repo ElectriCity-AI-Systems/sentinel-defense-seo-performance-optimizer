@@ -1,0 +1,35 @@
+{
+  "allowed_actions": [
+    "parse static report text",
+    "compare Sentinel reports",
+    "write reports",
+    "write state",
+    "write audit",
+    "write playbook"
+  ],
+  "blocked_actions": [
+    "live apply",
+    "DB write",
+    "SFTP write",
+    "cache purge",
+    "Cloudflare change",
+    "Nginx change",
+    ".htaccess change",
+    "FSE/Post/Theme/Plugin edit"
+  ],
+  "conflict_rules": {
+    "robots_meta": "If Sentinel sees follow,index, external no-robots claim becomes REPORT_CONFLICT_ROBOTS_META, not confirmed error."
+  },
+  "name": "external-seo-checker-report-learning",
+  "outputs": [
+    "/srv/sentinel-defense/reports/latest/external-seo-report-ingest.json",
+    "/srv/sentinel-defense/reports/latest/external-seo-report-recommendations.json",
+    "/srv/sentinel-defense/reports/latest/external-seo-report-conflicts.md"
+  ],
+  "purpose": "Ingest external SEO checker claims, compare with Sentinel data, and weight modern SEO/performance value.",
+  "risk_classification": {
+    "HIGH_VALUE_PERFORMANCE": "Performance monitoring and owner-review draft if repeated",
+    "LOW_LEGACY_OR_LOW_VALUE": "Low priority legacy signal",
+    "MEDIUM_OWNER_REVIEW": "Owner review only"
+  }
+}

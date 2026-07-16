@@ -1,0 +1,95 @@
+{
+  "allowed_actions": [
+    "read-only scan ausfuehren",
+    "History aktualisieren",
+    "Reports schreiben",
+    "Draft-Actions erzeugen",
+    "Watchdog pruefen",
+    "Anomalie melden",
+    "Known Issue beobachten",
+    "Trend auswerten"
+  ],
+  "blocked_actions": [
+    "Cache purge mit Backup",
+    "robots/sitemap setting aendern",
+    "SEO Plugin setting aendern",
+    "Meta-/Schema-Injection ueber MU-Plugin",
+    "Bildoptimierungsjob",
+    "Lazy-loading Script/HTML Patch",
+    "SourceMap WPO-Minify Patch",
+    "Microcache-Konfigurationsaenderung",
+    "DB delete/update",
+    "FSE Template edit",
+    "Page/Post edit",
+    "Theme/Plugin code edit",
+    ".htaccess Aenderung",
+    "Cloudflare Rule Aenderung",
+    "Nginx Aenderung",
+    "Redirect Aenderung",
+    "breite Bot-/WAF-Blockade"
+  ],
+  "confidence_rules": [
+    "High confidence requires at least two matching snapshots",
+    "Do not infer remediation from a single 24h rolling-window point",
+    "SOC/FSE source stays HIGH risk regardless of confidence"
+  ],
+  "disable_conditions": [
+    "breach=true",
+    "secret-like report content",
+    "live_apply=true",
+    "required input parser failure repeated three times"
+  ],
+  "healthchecks": [
+    "read-only score compare",
+    "known issue compare",
+    "breach flag check"
+  ],
+  "inputs": [
+    "reports/latest/low-risk-autonomy.json",
+    "state/low-risk-autonomy/history.jsonl",
+    "reports/latest/sentinel-master-report.json"
+  ],
+  "name": "adaptive-seo-performance-learning",
+  "output_reports": [
+    "reports/latest/adaptive-learning-engine.json",
+    "reports/latest/adaptive-recommendations.json"
+  ],
+  "owner_review_required": false,
+  "purpose": "Learn recurring SEO, schema, performance, and stability patterns from local Sentinel reports.",
+  "risk_level": "LOW_RISK_AUTO_ALLOWED",
+  "rollback_requirements": {
+    "clear_generated_draft_only": {
+      "autonomous_allowed": true,
+      "requires_owner_approval": false,
+      "scope": "own drafts/reports only"
+    },
+    "disable_temporary_mu_plugin": {
+      "autonomous_allowed": false,
+      "requires_backup": false,
+      "requires_owner_approval": true
+    },
+    "restore_db_option_from_backup": {
+      "autonomous_allowed": false,
+      "requires_backup": true,
+      "requires_owner_approval": true
+    },
+    "restore_file_from_backup": {
+      "autonomous_allowed": false,
+      "requires_backup": true,
+      "requires_owner_approval": true
+    },
+    "rollback_cache_purge": {
+      "autonomous_allowed": false,
+      "reason": "Cache regenerates; report and observe instead."
+    },
+    "rollback_cloudflare_nginx_htaccess": {
+      "autonomous_allowed": false,
+      "requires_owner_manual_action": true
+    }
+  },
+  "triggers": [
+    "new low-risk autonomy run",
+    "history updated",
+    "master status changed"
+  ]
+}

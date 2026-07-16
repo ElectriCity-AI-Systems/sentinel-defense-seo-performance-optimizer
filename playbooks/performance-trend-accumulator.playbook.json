@@ -1,0 +1,54 @@
+{
+  "allowed_actions": [
+    "read reports",
+    "append local history",
+    "analyze trends",
+    "write reports",
+    "write snapshots",
+    "write audit",
+    "write timer draft"
+  ],
+  "blocked_actions": [
+    "live apply",
+    "DB write",
+    "SFTP write",
+    "cache purge",
+    "CDN change",
+    "Nginx change",
+    ".htaccess change",
+    "FSE/Post/Page/Theme/Plugin edit",
+    "unit activation",
+    "cron install"
+  ],
+  "name": "performance-trend-accumulator",
+  "outputs": [
+    "/srv/sentinel-defense/reports/latest/performance-trend-accumulator.json",
+    "/srv/sentinel-defense/reports/latest/performance-owner-review-priority.json",
+    "/srv/sentinel-defense/state/performance-dryrun/trend_decision.json"
+  ],
+  "owner_review_required_for_actions": true,
+  "purpose": "Collect read-only performance trend points and prioritize MEDIUM owner-review actions.",
+  "risk_level": "LOW_RISK_READ_ONLY_MONITORING",
+  "trend_fields": [
+    "total_transfer_bytes",
+    "image_bytes",
+    "inline_css_count",
+    "internal_scripts_count",
+    "html_bytes",
+    "ttfb_ms",
+    "script_tag_count",
+    "stylesheet_count",
+    "image_count",
+    "lazy_image_count",
+    "webp_hint_count",
+    "global_p90_latency_ms",
+    "global_p90_ttfb_ms"
+  ],
+  "trend_logic": {
+    "improving": "at least 3 main values improve by more than 5 percent",
+    "insufficient": "history_points < 3",
+    "regression": "at least 3 main values worsen by more than 15 percent or unsafe signal appears",
+    "stable": "main values within plus/minus 5 percent",
+    "watch": "at least 2 main values worsen by more than 10 percent"
+  }
+}

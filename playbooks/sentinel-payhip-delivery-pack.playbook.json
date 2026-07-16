@@ -1,0 +1,16 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-07-03T15:12:11Z",
+  "playbook": "sentinel-payhip-delivery-pack",
+  "read_only": true,
+  "schema_version": "payhip-first-order-dryrun-9.8",
+  "sections": [
+    "Client report placeholder",
+    "Delivery message placeholder",
+    "Safety note",
+    "What was reviewed",
+    "What was not changed",
+    "Next safe steps",
+    "Completion checklist"
+  ]
+}

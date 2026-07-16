@@ -1,6 +1,6 @@
 {
   "applies_changes": false,
-  "generated_at": "2026-06-17T15:54:58Z",
+  "generated_at": "2026-07-03T15:12:11Z",
   "playbook": "sentinel-service-proof",
   "read_only": true,
   "schema_version": "service-proof-trend-9.2",

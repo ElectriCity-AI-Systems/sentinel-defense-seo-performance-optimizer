@@ -1,0 +1,26 @@
+{
+  "name": "sentinel-guarded-activation",
+  "phase": "10.18",
+  "purpose": "Close guarded-autonomy activation gates without bypassing the existing runtime state machine.",
+  "controller": "sentinel_guarded_activation.py",
+  "runtime_truth": "sentinel_guarded_autonomy.py",
+  "stages": [
+    "LEVEL_1_DRAFT_ONLY",
+    "LEVEL_2_SCHEDULER_VERIFICATION",
+    "LEVEL_2_GUARDED_CANARY",
+    "LEVEL_2_GUARDED_AUTONOMY"
+  ],
+  "required_gates": [
+    "credential_gate",
+    "health_target_gate",
+    "tls_gate",
+    "systemd_source_gate",
+    "systemd_install_gate",
+    "scheduler_verification_gate",
+    "canary_window_gate"
+  ],
+  "fail_closed": true,
+  "medium_enabled": false,
+  "high_enabled": false,
+  "reports_state_audit_commit_recommended": false
+}

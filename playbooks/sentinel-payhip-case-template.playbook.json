@@ -30,7 +30,7 @@
     "notes_public",
     "notes_internal_owner_only"
   ],
-  "generated_at": "2026-06-18T17:04:09Z",
+  "generated_at": "2026-07-03T15:12:11Z",
   "playbook": "sentinel-payhip-case-template",
   "read_only": true,
   "schema_version": "payhip-fulfillment-board-9.7"

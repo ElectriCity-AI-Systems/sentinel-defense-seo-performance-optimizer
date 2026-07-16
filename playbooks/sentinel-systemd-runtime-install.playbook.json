@@ -1,0 +1,17 @@
+{
+  "playbook_id": "sentinel-systemd-runtime-install",
+  "phase": "10.19",
+  "purpose": "Install only the fixed guarded-autonomy service and timer after source and runtime gates pass.",
+  "modes": [
+    "SYSTEM_SCOPE",
+    "USER_SCOPE_WITH_LINGER",
+    "OWNER_ACTION_REQUIRED"
+  ],
+  "fixed_exec_start": "/usr/bin/python3 /srv/sentinel-defense/sentinel_guarded_autonomy.py --run-cycle",
+  "timer_interval_minutes": 2,
+  "user_scope_requires_linger": true,
+  "single_timer_scope_required": true,
+  "rollback_on_failure": true,
+  "free_paths_allowed": false,
+  "free_commands_allowed": false
+}

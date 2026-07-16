@@ -23,11 +23,13 @@
   "max_cycles": 5,
   "name": "sentinel-autonomous-cycle-stop-rules",
   "phase": "10.1",
+  "priority_model_path": "state/adaptive-learning/autonomy_task_priority_model.json",
   "stop_reasons": [
     "STOP_ON_BREACH",
     "STOP_ON_FORBIDDEN_PATTERN",
     "STOP_ON_KERNEL_FAILURE",
     "STOP_ON_REPEATED_TASK_LOOP",
+    "STOP_ON_NO_DIVERSE_SAFE_TASK",
     "STOP_ON_NO_SAFE_TASK",
     "STOP_ON_MAX_CYCLES",
     "STOP_ON_LOCK_COLLISION",

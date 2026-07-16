@@ -14,6 +14,7 @@
     "repair_missing_public_asset",
     "repair_invalid_json_output",
     "rebuild_manifest_and_checksums",
+    "repair_capability_health_warning",
     "update_learning_state",
     "write_audit_event",
     "generate_git_checkpoint_suggestion"
@@ -37,6 +38,7 @@
   "cooldowns": {
     "generate_next_safe_actions": 2,
     "rebuild_payhip_upload_pack": 3,
+    "repair_capability_health_warning": 2,
     "rerun_payhip_launch_qa": 3,
     "run_first_order_dryrun": 5,
     "update_fulfillment_board": 3,

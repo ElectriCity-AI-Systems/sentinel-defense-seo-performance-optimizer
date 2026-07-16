@@ -1,0 +1,27 @@
+{
+  "playbook_id": "sentinel-challenge-aware-health",
+  "phase": "10.19",
+  "purpose": "Classify a reproducible Cloudflare edge challenge as an unchanged monitoring baseline without accepting generic HTTP 403 responses.",
+  "required_checks": [
+    "tls_verified",
+    "approved_final_host",
+    "cloudflare_headers_present",
+    "challenge_markers_present",
+    "robots_health_pass",
+    "three_reproducible_signatures",
+    "no_5xx"
+  ],
+  "stored_evidence": [
+    "normalized_signature",
+    "health_class",
+    "redirect_class",
+    "tls_state"
+  ],
+  "never_store": [
+    "response_body",
+    "challenge_token",
+    "cookie"
+  ],
+  "generic_403_result": "HEALTH_FAIL",
+  "breach": false
+}

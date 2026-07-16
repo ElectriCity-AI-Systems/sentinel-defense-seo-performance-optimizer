@@ -1,0 +1,22 @@
+{
+  "playbook_id": "sentinel-monitoring-activation",
+  "phase": "10.19",
+  "purpose": "Activate permanent monitoring independently of productive LOW_LIVE adapter readiness.",
+  "required_gates": [
+    "health_green_or_challenge_aware",
+    "tls_green_or_stale_history_green",
+    "systemd_timer_active",
+    "policy_valid",
+    "audit_valid",
+    "runtime_lock_valid",
+    "breach_false"
+  ],
+  "runtime_flags": {
+    "monitoring_enabled": true,
+    "guarded_live_autonomy_enabled": false,
+    "low_live_apply_enabled": false,
+    "production_apply_lock": true,
+    "emergency_stop": false,
+    "breach": false
+  }
+}

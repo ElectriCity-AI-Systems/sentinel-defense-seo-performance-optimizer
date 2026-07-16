@@ -1,0 +1,13 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-public-release-safety-docs",
+  "phase": "10.11",
+  "purpose": "Document public safety boundaries and owner command limits.",
+  "schema_version": "sentinel-public-release-pack-10.11"
+}

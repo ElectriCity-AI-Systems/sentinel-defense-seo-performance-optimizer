@@ -1,0 +1,13 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-public-release-sales-copy",
+  "phase": "10.11",
+  "purpose": "Build sanitized Payhip, Gumroad, FAQ and GitHub release copy without claims beyond the validated local scope.",
+  "schema_version": "sentinel-public-release-pack-10.11"
+}

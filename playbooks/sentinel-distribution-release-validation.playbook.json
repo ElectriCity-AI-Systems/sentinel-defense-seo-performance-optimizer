@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "checks": [
+    "json_valid",
+    "markdown_nonempty",
+    "no_sensitive_values",
+    "no_private_paths",
+    "no_ip_addresses",
+    "no_forbidden_claims"
+  ],
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-distribution-release-validation",
+  "phase": "10.12",
+  "schema_version": "sentinel-distribution-release-pack-10.12"
+}

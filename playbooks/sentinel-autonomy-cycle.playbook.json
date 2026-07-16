@@ -1,0 +1,18 @@
+{
+  "applies_changes": false,
+  "generated_at": "2026-07-03T15:11:50Z",
+  "network_access": false,
+  "playbook": "sentinel-autonomy-cycle",
+  "read_only_core": true,
+  "schema_version": "self-governing-safe-autonomy-kernel-10.0",
+  "steps": [
+    "Observe project state and inputs.",
+    "Decide the next sensible task by priority.",
+    "Classify risk and check if auto-allowed.",
+    "Execute only READ_ONLY/DRAFT/LOW_LOCAL/LOW_EXPORT/LOW_STATE.",
+    "Validate outputs and invariants.",
+    "Repair safe failures only.",
+    "Learn and emit owner summary + next suggestion."
+  ],
+  "uploads_anything": false
+}

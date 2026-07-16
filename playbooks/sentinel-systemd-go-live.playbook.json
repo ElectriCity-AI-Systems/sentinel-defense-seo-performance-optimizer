@@ -1,0 +1,31 @@
+{
+  "name": "sentinel-systemd-go-live",
+  "phase": "10.18",
+  "installation_is_owner_approved_one_time_action": true,
+  "exec_start": "/usr/bin/python3 /srv/sentinel-defense/sentinel_guarded_autonomy.py --run-cycle",
+  "shell_wrapper": false,
+  "timer_interval_minutes": 2,
+  "verify_sources_before_install": true,
+  "verify_installed_content": true,
+  "backup_existing_units": true,
+  "rollback_on_mismatch": true,
+  "required_hardening": [
+    "NoNewPrivileges=true",
+    "PrivateTmp=true",
+    "ProtectSystem=strict",
+    "ProtectHome=true",
+    "ProtectKernelTunables=true",
+    "ProtectKernelModules=true",
+    "ProtectControlGroups=true",
+    "LockPersonality=true",
+    "RestrictSUIDSGID=true",
+    "RestrictRealtime=true",
+    "MemoryDenyWriteExecute=true"
+  ],
+  "allowed_write_areas": [
+    "reports",
+    "state",
+    "audit"
+  ],
+  "remote_publication": false
+}

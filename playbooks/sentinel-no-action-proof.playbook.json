@@ -1,0 +1,20 @@
+{
+  "allowed_apply_now": false,
+  "breach": false,
+  "emergency_stop": true,
+  "high_blocked": true,
+  "live_apply": false,
+  "low_live_executable": false,
+  "medium_executable": false,
+  "name": "sentinel-no-action-proof",
+  "phase": "10.15",
+  "proof_items": [
+    "no_readme_overwrite",
+    "no_license_overwrite",
+    "no_git_tag",
+    "no_remote_push",
+    "no_marketplace_api",
+    "no_live_apply"
+  ],
+  "schema_version": "sentinel-manual-publication-handoff-10.15"
+}
