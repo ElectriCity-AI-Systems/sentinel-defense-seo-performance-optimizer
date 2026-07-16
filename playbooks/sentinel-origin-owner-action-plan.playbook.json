@@ -1,0 +1,19 @@
+{
+  "automatic_execution": false,
+  "blocked_priorities": [
+    "NEW_WAF_RULE",
+    "TIMER_INSTALLATION",
+    "LOW_RISK_AUTONOMY_ACTIVATION"
+  ],
+  "name": "sentinel-origin-owner-action-plan",
+  "ordered_review": [
+    "status_503_diagnosis",
+    "status_526_tls_review",
+    "status_504_rolling_window_observation",
+    "path_correlation",
+    "origin_evidence_review"
+  ],
+  "risk_class": "DRAFT",
+  "schema_version": "10.17",
+  "selected_priority": "WEBSITE_ORIGIN_STABILITY"
+}

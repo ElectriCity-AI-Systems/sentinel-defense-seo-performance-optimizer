@@ -1,0 +1,9 @@
+{
+  "causality_policy": "correlation_is_not_causality",
+  "evidence_levels": ["A_DIRECT", "B_STRONG_CORRELATION", "C_WEAK_CORRELATION"],
+  "inputs": ["local_status_aggregates", "local_path_aggregates", "local_actor_aggregates", "local_origin_evidence"],
+  "name": "sentinel-origin-503-correlation",
+  "prohibited_conclusions": ["php_worker_exhaustion_without_logs", "plugin_failure_without_logs", "hosting_limit_without_logs"],
+  "risk_class": "READ_ONLY",
+  "schema_version": "10.17"
+}

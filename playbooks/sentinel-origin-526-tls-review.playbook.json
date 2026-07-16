@@ -1,0 +1,15 @@
+{
+  "automatic_ssl_change": false,
+  "certificate_validation_disable_recommended": false,
+  "manual_checks": [
+    "review_tls_events",
+    "review_origin_certificate_validity",
+    "review_hostname_and_san",
+    "review_certificate_chain",
+    "correlate_renewal_timestamps"
+  ],
+  "name": "sentinel-origin-526-tls-review",
+  "risk_class": "READ_ONLY",
+  "schema_version": "10.17",
+  "ssl_downgrade_recommended": false
+}

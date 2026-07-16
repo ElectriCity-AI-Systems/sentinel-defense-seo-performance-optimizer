@@ -1,0 +1,23 @@
+{
+  "allowed_scope": [
+    "reports",
+    "state",
+    "audit",
+    "docs",
+    "data",
+    "snapshots"
+  ],
+  "blocked_actions": [
+    "live_apply",
+    "network_access",
+    "remote_write",
+    "scheduler_installation",
+    "service_restart"
+  ],
+  "breach": false,
+  "mode": "read_only_local_diagnostics",
+  "name": "sentinel-origin-failure-diagnostics",
+  "risk_class": "READ_ONLY",
+  "schema_version": "10.17",
+  "status_codes": [503, 504, 522, 526]
+}
