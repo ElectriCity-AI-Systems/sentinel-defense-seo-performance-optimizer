@@ -1,0 +1,97 @@
+{
+  "schema_version": "sentinel-operational-evidence-twin-policy-1",
+  "policy_version": 1,
+  "mode": "SHADOW_ONLY",
+  "owner_policy_approved": false,
+  "runtime_network_enabled": false,
+  "automatic_apply_enabled": false,
+  "maximum_snapshots": 48,
+  "minimum_snapshots_for_regime_analysis": 4,
+  "freshness_seconds": {
+    "current": 86400,
+    "stale_informational": 604800
+  },
+  "fixed_inputs": [
+    "reports/latest/sentinel-master-consistency.json",
+    "reports/latest/sentinel-origin-failure-diagnostics.json",
+    "reports/latest/sentinel-ionos-webspace-owner-evidence.json",
+    "reports/latest/sentinel-guarded-runtime-activation.json",
+    "state/adaptive-learning/origin_failure_diagnostics_history.json"
+  ],
+  "cloudflare_snapshot_root": "cloudflare-monitor",
+  "cloudflare_snapshot_files": [
+    "meta.json",
+    "metrics.json",
+    "status-24h.json",
+    "errors-5xx-24h.json"
+  ],
+  "provisional_reliability_reference": {
+    "owner_approved": false,
+    "technical_availability_target": 0.99,
+    "window": "observed_24h_snapshot",
+    "minimum_requests": 100,
+    "status_denominator_tolerance_percent": 5.0,
+    "human_user_slo_available": false
+  },
+  "regime_detection": {
+    "baseline_window": 8,
+    "minimum_baseline_points": 4,
+    "mad_multiplier": 6.0,
+    "change_episode_coalesce_minutes": 90,
+    "absolute_thresholds": {
+      "total_5xx": 25,
+      "status_503": 25,
+      "status_504": 25,
+      "status_522": 1,
+      "status_526": 1,
+      "sitelock_requests": 25
+    }
+  },
+  "shadow_actions": [
+    {
+      "action_id": "MONITOR_AND_CORRELATE",
+      "risk": "READ_ONLY",
+      "auto_execute": false,
+      "required_evidence": ["current_snapshot"],
+      "forbidden_effects": ["remote_write", "production_apply"]
+    },
+    {
+      "action_id": "REQUEST_DIRECT_ORIGIN_EVIDENCE",
+      "risk": "READ_ONLY",
+      "auto_execute": false,
+      "required_evidence": ["origin_failure_signal", "direct_evidence_gap"],
+      "forbidden_effects": ["credential_request", "remote_log_access"]
+    },
+    {
+      "action_id": "REVIEW_SITELOCK_SCAN_SCHEDULE",
+      "risk": "OWNER_REVIEW",
+      "auto_execute": false,
+      "required_evidence": ["synchronized_sequence", "timestamp_correlation"],
+      "forbidden_effects": ["actor_wide_block", "scanner_disable"]
+    },
+    {
+      "action_id": "EXACT_SCANNER_CHALLENGE_CANARY",
+      "risk": "LOW_LIVE_CANDIDATE",
+      "auto_execute": false,
+      "required_evidence": ["fresh_exact_path_trigger", "write_canary_ok", "rollback_ready"],
+      "forbidden_effects": ["country_block", "asn_block", "browser_block", "root_path_rule"]
+    },
+    {
+      "action_id": "ANONYMOUS_MICROCACHE_CANARY",
+      "risk": "LOW_LIVE_CANDIDATE",
+      "auto_execute": false,
+      "required_evidence": ["anonymous_get_proof", "cookie_exclusions", "adapter_validation", "rollback_ready"],
+      "forbidden_effects": ["login_cache", "checkout_cache", "personalized_cache", "post_cache"]
+    }
+  ],
+  "safety": {
+    "live_apply": false,
+    "remote_write": false,
+    "network_access": false,
+    "shell_execution": false,
+    "scheduler_install": false,
+    "medium_executable": false,
+    "high_executable": false,
+    "breach": false
+  }
+}

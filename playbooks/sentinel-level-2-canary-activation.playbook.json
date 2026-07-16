@@ -1,0 +1,27 @@
+{
+  "playbook_id": "sentinel-level-2-canary-activation",
+  "phase": "10.20",
+  "purpose": "Enable only the two owner-approved LOW_LIVE classes after all guarded canary gates pass.",
+  "required_gates": [
+    "systemd install verified",
+    "systemd timer active",
+    "three-cycle scheduler verification green",
+    "challenge-aware health green",
+    "TLS green",
+    "Cloudflare disabled-rule write canary green",
+    "rollback test green",
+    "circuit breaker armed",
+    "breach false"
+  ],
+  "enabled_classes": [
+    "temporary_high_confidence_scanner_challenge",
+    "sentinel_owned_rule_rollback"
+  ],
+  "disabled_classes": [
+    "login_protection",
+    "microcache",
+    "worker_restart",
+    "MEDIUM",
+    "HIGH"
+  ]
+}

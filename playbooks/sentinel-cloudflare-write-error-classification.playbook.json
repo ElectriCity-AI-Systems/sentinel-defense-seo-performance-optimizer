@@ -1,0 +1,29 @@
+{
+  "playbook_id": "sentinel-cloudflare-write-error-classification",
+  "phase": "10.20",
+  "purpose": "Classify fixed-scope Cloudflare write-canary failures without retaining credentials or full API responses.",
+  "allowed_categories": [
+    "AUTHENTICATION_FAILED",
+    "INSUFFICIENT_PERMISSION",
+    "RULESET_NOT_FOUND",
+    "RULESET_PHASE_MISMATCH",
+    "INVALID_REQUEST_SCHEMA",
+    "UNSUPPORTED_DISABLED_RULE",
+    "ZONE_SCOPE_MISMATCH",
+    "ENDPOINT_MISMATCH",
+    "RATE_LIMITED",
+    "UNKNOWN_4XX"
+  ],
+  "persisted_evidence": [
+    "HTTP status code",
+    "numeric Cloudflare error codes",
+    "endpoint class",
+    "ruleset phase",
+    "scope booleans"
+  ],
+  "forbidden_evidence": [
+    "credential values",
+    "authorization headers",
+    "full API response bodies"
+  ]
+}

@@ -71,6 +71,8 @@ FIXED_COMMANDS: Dict[str, Tuple[str, ...]] = {
         "-p",
         "NoNewPrivileges",
         "-p",
+        "EnvironmentFiles",
+        "-p",
         "LoadState",
     ),
 }
@@ -161,6 +163,7 @@ def verify_install() -> Dict[str, Any]:
         "fixed_service_group": bool(identity.get("group") and f"Group={identity['group']}" in show["stdout"]),
         "no_new_privileges": "NoNewPrivileges=yes" in show["stdout"],
         "fixed_exec_start": "/usr/bin/python3 /srv/sentinel-defense/sentinel_guarded_autonomy.py --run-cycle" in show["stdout"],
+        "fixed_environment_file": "/etc/sentinel-defense.env" in show["stdout"],
     }
     timer_active = run_fixed("timer_active")["returncode"] == 0
     timer_enabled = run_fixed("timer_enabled")["returncode"] == 0

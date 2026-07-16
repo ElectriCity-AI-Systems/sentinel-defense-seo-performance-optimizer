@@ -1,0 +1,16 @@
+{
+  "playbook_id": "sentinel-owner-assisted-systemd-go-live",
+  "phase": "10.20",
+  "purpose": "Install and verify the fixed guarded-autonomy systemd units without arbitrary commands or paths.",
+  "fixed_owner_command": "sudo python3 /srv/sentinel-defense/sentinel_guarded_systemd_installer.py --install",
+  "requirements": [
+    "source gate green",
+    "health gate green",
+    "TLS gate green",
+    "policy valid",
+    "audit valid",
+    "breach false"
+  ],
+  "on_missing_noninteractive_privilege": "OWNER_SYSTEMD_ACTION_REQUIRED",
+  "remote_apply": false
+}

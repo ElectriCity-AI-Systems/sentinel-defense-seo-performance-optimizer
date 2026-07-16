@@ -990,10 +990,32 @@ def semantic_rules_hash(rules: Any) -> str:
 
 
 class CloudflareAdapterRequestError(RuntimeError):
-    def __init__(self, status_code: Optional[int], operation: str) -> None:
+    def __init__(
+        self,
+        status_code: Optional[int],
+        operation: str,
+        error_codes: Optional[Sequence[int]] = None,
+    ) -> None:
         super().__init__(f"registered Cloudflare adapter {operation} failed")
         self.status_code = status_code
         self.operation = operation
+        self.error_codes = tuple(sorted(set(error_codes or [])))
+
+
+def cloudflare_error_codes(value: Any) -> List[int]:
+    """Extract non-secret numeric error codes without retaining API messages."""
+    if not isinstance(value, dict) or not isinstance(value.get("errors"), list):
+        return []
+    codes: List[int] = []
+    for item in value["errors"]:
+        if not isinstance(item, dict):
+            continue
+        code = item.get("code")
+        if isinstance(code, int) and not isinstance(code, bool):
+            codes.append(code)
+        elif isinstance(code, str) and code.isdigit():
+            codes.append(int(code))
+    return sorted(set(codes))
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -1306,12 +1328,21 @@ class CloudflareGuardedAdapter:
             with urllib.request.urlopen(request, timeout=15) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            exc.close()
-            raise CloudflareAdapterRequestError(int(exc.code), method.lower()) from exc
+            try:
+                error_value = json.loads(exc.read(65536).decode("utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                error_value = {}
+            finally:
+                exc.close()
+            raise CloudflareAdapterRequestError(
+                int(exc.code),
+                method.lower(),
+                cloudflare_error_codes(error_value),
+            ) from exc
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise CloudflareAdapterRequestError(None, method.lower()) from exc
         if not isinstance(result, dict) or result.get("success") is not True:
-            raise CloudflareAdapterRequestError(None, method.lower())
+            raise CloudflareAdapterRequestError(None, method.lower(), cloudflare_error_codes(result))
         return result
 
     @staticmethod
@@ -1427,7 +1458,15 @@ class CloudflareGuardedAdapter:
             return {
                 "status": "CLOUDFLARE_WRITE_CANARY_BLOCKED",
                 "reason": "fixed_scope_write_permission_or_disabled_rule_create_unavailable",
+                "http_status_code": create_error.status_code if create_error else None,
                 "http_status_class": f"{create_error.status_code // 100}xx" if create_error and create_error.status_code else None,
+                "cloudflare_error_codes": list(create_error.error_codes) if create_error else [],
+                "request_endpoint_class": "ZONE_RULESET_SINGLE_RULE_CREATE",
+                "ruleset_phase": "http_request_firewall_custom",
+                "ruleset_id_present": True,
+                "zone_scope_valid": True,
+                "request_schema_valid": True,
+                "adapter_method": "POST",
                 "created": False,
                 "verified": False,
                 "deleted": False,
@@ -1474,6 +1513,15 @@ class CloudflareGuardedAdapter:
         return {
             "status": "CLOUDFLARE_WRITE_CANARY_OK" if restored else "CLOUDFLARE_WRITE_CANARY_BLOCKED",
             "reason": "disabled_rule_created_verified_deleted_and_absence_verified" if restored else "concurrent_ruleset_drift_after_verified_canary_deletion",
+            "http_status_code": 200,
+            "http_status_class": "2xx",
+            "cloudflare_error_codes": [],
+            "request_endpoint_class": "ZONE_RULESET_SINGLE_RULE_CREATE",
+            "ruleset_phase": "http_request_firewall_custom",
+            "ruleset_id_present": True,
+            "zone_scope_valid": True,
+            "request_schema_valid": True,
+            "adapter_method": "POST",
             "created": True,
             "verified": True,
             "deleted": True,

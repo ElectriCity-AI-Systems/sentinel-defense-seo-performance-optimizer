@@ -1,0 +1,38 @@
+{
+  "schema_version": "sentinel-operational-evidence-twin-playbook-1",
+  "name": "sentinel-operational-evidence-twin",
+  "risk_class": "READ_ONLY_SHADOW",
+  "purpose": "Represent local operational states and transitions without changing production systems.",
+  "inputs": [
+    "fixed_local_sentinel_reports",
+    "fixed_local_cloudflare_snapshots",
+    "private_owner_evidence",
+    "local_runtime_state"
+  ],
+  "pipeline": [
+    "discover_fixed_inputs",
+    "normalize_events",
+    "build_incident_fingerprints",
+    "detect_robust_regime_changes",
+    "build_provenance_graph",
+    "evaluate_provisional_reliability_reference",
+    "run_counterfactual_shadow_replay",
+    "validate_and_audit"
+  ],
+  "trust_boundaries": [
+    "correlation_is_not_causality",
+    "aggregate_traffic_is_not_verified_human_impact",
+    "stale_evidence_does_not_override_current_state",
+    "shadow_policy_never_executes"
+  ],
+  "prohibited": [
+    "network_access",
+    "remote_write",
+    "production_apply",
+    "scheduler_install",
+    "credential_read",
+    "policy_expansion",
+    "medium_or_high_execution"
+  ],
+  "breach": false
+}

@@ -1,0 +1,16 @@
+{
+  "playbook_id": "sentinel-three-cycle-verification",
+  "phase": "10.20",
+  "purpose": "Verify three real, sequential systemd service cycles before enabling productive LOW_LIVE actions.",
+  "required_cycles": 3,
+  "allowed_decisions": [
+    "NO_ACTION",
+    "ACTION_CANDIDATE_BLOCKED_BY_VERIFICATION_STAGE"
+  ],
+  "required_findings": {
+    "overlapping_cycles": 0,
+    "invalid_audit_rows": 0,
+    "unexpected_write_paths": 0,
+    "productive_actions": 0
+  }
+}

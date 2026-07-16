@@ -1,0 +1,14 @@
+{
+  "playbook_id": "sentinel-level-2-monitoring",
+  "phase": "10.20",
+  "purpose": "Keep 24/7 monitoring independent from productive Cloudflare write readiness.",
+  "runtime_flags": {
+    "monitoring_enabled": true,
+    "guarded_live_autonomy_enabled": false,
+    "low_live_apply_enabled": false,
+    "production_apply_lock": true,
+    "emergency_stop": false,
+    "breach": false
+  },
+  "required_systemd_timer": true
+}
