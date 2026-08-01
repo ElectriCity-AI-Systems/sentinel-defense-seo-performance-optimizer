@@ -650,21 +650,22 @@ def verify_scheduler() -> Dict[str, Any]:
     systemd = systemd_runtime_status()
     scheduler = guarded.load_dict(SCHEDULER_STATE)
     if runtime.get("activation_stage") == STAGE_MONITORING and systemd["timer_active"]:
-        guarded.transition(runtime, guarded.PREFLIGHT)
-        runtime["activation_stage"] = STAGE_SCHEDULER
-        runtime["autonomy_level"] = STAGE_SCHEDULER
-        runtime["flags"].update(guarded.monitoring_flags())
-        runtime["status"] = "GUARDED_SCHEDULER_VERIFICATION_ACTIVE"
-        runtime["preflight"] = {"status": "GUARDED_AUTONOMY_PREFLIGHT_GREEN", "blockers": [], "monitoring_only": True}
-        guarded.write_state(runtime, record_history=True)
-        scheduler = {
-            "status": "SCHEDULER_VERIFICATION_IN_PROGRESS",
-            "started_at": guarded.utc_now(),
-            "required_cycles": 3,
-            "successful_cycles": 0,
-        }
-        guarded.write_json(SCHEDULER_STATE, scheduler)
-    if runtime.get("activation_stage") != STAGE_SCHEDULER or not scheduler.get("started_at"):
+        if scheduler.get("status") != "SCHEDULER_VERIFICATION_GREEN":
+            guarded.transition(runtime, guarded.PREFLIGHT)
+            runtime["activation_stage"] = STAGE_SCHEDULER
+            runtime["autonomy_level"] = STAGE_SCHEDULER
+            runtime["flags"].update(guarded.monitoring_flags())
+            runtime["status"] = "GUARDED_SCHEDULER_VERIFICATION_ACTIVE"
+            runtime["preflight"] = {"status": "GUARDED_AUTONOMY_PREFLIGHT_GREEN", "blockers": [], "monitoring_only": True}
+            guarded.write_state(runtime, record_history=True)
+            scheduler = {
+                "status": "SCHEDULER_VERIFICATION_IN_PROGRESS",
+                "started_at": guarded.utc_now(),
+                "required_cycles": 3,
+                "successful_cycles": 0,
+            }
+            guarded.write_json(SCHEDULER_STATE, scheduler)
+    if runtime.get("activation_stage") not in {STAGE_SCHEDULER, STAGE_MONITORING} or not scheduler.get("started_at"):
         result = {
             "schema_version": SCHEMA_VERSION,
             "generated_at": guarded.utc_now(),
@@ -698,6 +699,13 @@ def verify_scheduler() -> Dict[str, Any]:
     )
     if not all((result["no_overlap"], result["no_unexpected_writes"], result["no_policy_drift"], result["no_runtime_drift"])):
         result["status"] = "SCHEDULER_VERIFICATION_BLOCKED"
+    if result["status"] == "SCHEDULER_VERIFICATION_GREEN" and systemd["timer_active"]:
+        if runtime.get("activation_stage") == STAGE_SCHEDULER:
+            runtime["activation_stage"] = STAGE_MONITORING
+            runtime["autonomy_level"] = STAGE_MONITORING
+            runtime["status"] = "GUARDED_MONITORING_ACTIVE"
+            runtime["flags"].update(guarded.monitoring_flags())
+            guarded.write_state(runtime, record_history=True)
     guarded.write_json(SCHEDULER_STATE, result)
     guarded.write_text(SCHEDULER_MD, render_scheduler(result))
     append_audit("verify_scheduler", result["status"], {"successful_cycles": result["successful_cycles"]})
@@ -719,7 +727,7 @@ def activate_guarded_canary() -> Dict[str, Any]:
         blockers.append("rollback_test")
     if circuit.get("status") != "CIRCUIT_BREAKER_ARMED":
         blockers.append("circuit_breaker")
-    if runtime.get("machine_state") != guarded.PREFLIGHT or runtime.get("activation_stage") != STAGE_SCHEDULER:
+    if runtime.get("machine_state") != guarded.PREFLIGHT or runtime.get("activation_stage") not in {STAGE_SCHEDULER, STAGE_MONITORING}:
         blockers.append("scheduler_runtime_stage")
     if blockers:
         result = {
@@ -808,15 +816,11 @@ def evaluate_promotion() -> Dict[str, Any]:
     runtime = guarded.load_state()
     canary = guarded.load_dict(PROMOTION_STATE)
     started = guarded.parse_timestamp(canary.get("started_at"))
-    if runtime.get("activation_stage") != STAGE_CANARY or started is None:
-        result = {
-            "status": "RUNTIME_PROMOTION_NOT_STARTED",
-            "activation_stage": runtime.get("activation_stage", STAGE_LEVEL_1),
-            "elapsed_minutes": 0.0,
-            "successful_cycles": 0,
-            "breach": runtime.get("flags", {}).get("breach", False),
-        }
-    else:
+    scheduler = guarded.load_dict(SCHEDULER_STATE)
+    write_canary = guarded.load_dict(WRITE_CANARY_STATE)
+    systemd = systemd_runtime_status()
+
+    if runtime.get("activation_stage") == STAGE_CANARY and started is not None:
         rows, invalid = guarded_rows_since(canary.get("started_at"))
         elapsed = max(0.0, (guarded.utc_now_dt() - started).total_seconds() / 60.0)
         allowed = {"NO_ACTION", "LOW_LIVE_CANDIDATE", "MONITOR_ACTIVE_ACTION", "ACTIVE_ACTION_VALIDATED", "TTL_ROLLBACK_COMPLETE"}
@@ -840,10 +844,14 @@ def evaluate_promotion() -> Dict[str, Any]:
         result.update(
             {
                 "activation_stage": runtime.get("activation_stage"),
+                "runtime_stage": runtime.get("activation_stage"),
                 "started_at": canary.get("started_at"),
                 "evaluated_at": guarded.utc_now(),
                 "elapsed_minutes": round(elapsed, 2),
-                "successful_cycles": successful,
+                "scheduler_successful_cycles": scheduler.get("successful_cycles", 0),
+                "guarded_canary_started": True,
+                "guarded_canary_successful_cycles": successful,
+                "promotion_elapsed_minutes": round(elapsed, 2),
                 "breach": False,
             }
         )
@@ -855,9 +863,83 @@ def evaluate_promotion() -> Dict[str, Any]:
             runtime["status"] = "GUARDED_AUTONOMY_ACTIVE"
             guarded.write_state(runtime, record_history=True)
             result["activation_stage"] = STAGE_ACTIVE
+    elif runtime.get("activation_stage") in {STAGE_MONITORING, STAGE_SCHEDULER}:
+        if scheduler.get("status") == "SCHEDULER_VERIFICATION_GREEN" and systemd["timer_active"]:
+            if write_canary.get("status") != "CLOUDFLARE_WRITE_CANARY_OK":
+                result = {
+                    "status": "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_CANARY",
+                    "activation_stage": STAGE_MONITORING,
+                    "runtime_stage": STAGE_MONITORING,
+                    "scheduler_verification_status": scheduler.get("status"),
+                    "scheduler_successful_cycles": scheduler.get("successful_cycles", 0),
+                    "guarded_canary_started": False,
+                    "guarded_canary_successful_cycles": 0,
+                    "promotion_elapsed_minutes": 0.0,
+                    "blockers": ["cloudflare_write_canary"],
+                    "monitoring_enabled": True,
+                    "timer_active": True,
+                    "low_live_apply_enabled": False,
+                    "production_apply_lock": True,
+                    "emergency_stop": False,
+                    "breach": False,
+                }
+            else:
+                result = {
+                    "status": "RUNTIME_PROMOTION_READY_FOR_CANARY",
+                    "activation_stage": STAGE_MONITORING,
+                    "runtime_stage": STAGE_MONITORING,
+                    "scheduler_verification_status": scheduler.get("status"),
+                    "scheduler_successful_cycles": scheduler.get("successful_cycles", 0),
+                    "guarded_canary_started": False,
+                    "guarded_canary_successful_cycles": 0,
+                    "promotion_elapsed_minutes": 0.0,
+                    "blockers": [],
+                    "monitoring_enabled": True,
+                    "timer_active": True,
+                    "low_live_apply_enabled": False,
+                    "production_apply_lock": True,
+                    "emergency_stop": False,
+                    "breach": False,
+                }
+        else:
+            result = {
+                "status": "RUNTIME_PROMOTION_SCHEDULER_NOT_READY",
+                "activation_stage": runtime.get("activation_stage", STAGE_LEVEL_1),
+                "runtime_stage": runtime.get("activation_stage", STAGE_LEVEL_1),
+                "scheduler_verification_status": scheduler.get("status"),
+                "scheduler_successful_cycles": scheduler.get("successful_cycles", 0),
+                "guarded_canary_started": False,
+                "guarded_canary_successful_cycles": 0,
+                "promotion_elapsed_minutes": 0.0,
+                "blockers": ["scheduler_verification"],
+                "monitoring_enabled": True,
+                "timer_active": systemd["timer_active"],
+                "low_live_apply_enabled": False,
+                "production_apply_lock": True,
+                "emergency_stop": False,
+                "breach": False,
+            }
+    else:
+        result = {
+            "status": "RUNTIME_PROMOTION_NOT_STARTED",
+            "activation_stage": runtime.get("activation_stage", STAGE_LEVEL_1),
+            "runtime_stage": runtime.get("activation_stage", STAGE_LEVEL_1),
+            "scheduler_verification_status": None,
+            "scheduler_successful_cycles": 0,
+            "guarded_canary_started": False,
+            "guarded_canary_successful_cycles": 0,
+            "promotion_elapsed_minutes": 0.0,
+            "blockers": [],
+            "monitoring_enabled": False,
+            "timer_active": False,
+            "low_live_apply_enabled": False,
+            "production_apply_lock": True,
+            "emergency_stop": True,
+            "breach": runtime.get("flags", {}).get("breach", False),
+        }
     guarded.write_json(PROMOTION_STATE, result)
     guarded.write_text(PROMOTION_MD, render_promotion(result))
-    append_audit("evaluate_promotion", result["status"], {"successful_cycles": result.get("successful_cycles", 0)})
+    append_audit("evaluate_promotion", result["status"], {"scheduler_successful_cycles": result.get("scheduler_successful_cycles", 0), "guarded_canary_successful_cycles": result.get("guarded_canary_successful_cycles", 0)})
     write_consolidated_report()
     return result
 
@@ -978,6 +1060,7 @@ def self_test() -> Dict[str, Any]:
         0,
     )
     promotion = promotion_logic(61.0, 20, 0, 0, 0, False, False, 0, 0)
+    promotion_live = evaluate_promotion()
     canary_circuit = guarded.circuit_breaker_default()
     canary_circuit["actions"] = [{"timestamp": guarded.utc_now(), "action_id": "prior-canary"}]
     canary_rate_limit = guarded.rate_limit_allows(
@@ -1017,6 +1100,10 @@ def self_test() -> Dict[str, Any]:
         "test_i_monitoring_flags": guarded.monitoring_flags()["emergency_stop"] is False
         and guarded.monitoring_flags()["production_apply_lock"] is True,
         "test_j_promotion": promotion["status"] == "RUNTIME_PROMOTION_GREEN",
+        "test_k_promotion_blocked_by_write_canary": promotion_live["status"] == "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_CANARY",
+        "test_l_scheduler_cycles_preserved": promotion_live.get("scheduler_successful_cycles", 0) >= 3,
+        "test_m_no_canary_cycles_on_blocked": promotion_live.get("guarded_canary_successful_cycles", 0) == 0,
+        "test_n_monitoring_not_fallback": promotion_live.get("runtime_stage") in {STAGE_MONITORING, STAGE_SCHEDULER},
         "scheduler_three_cycles": scheduler["status"] == "SCHEDULER_VERIFICATION_GREEN",
         "canary_one_action_per_hour": canary_rate_limit == (False, "hourly_action_limit"),
         "no_shell_true": shell_true is False,
@@ -1174,7 +1261,19 @@ def render_canary(value: Dict[str, Any]) -> str:
 
 
 def render_promotion(value: Dict[str, Any]) -> str:
-    return "\n".join(["# Sentinel Runtime Promotion", "", f"- status: `{value.get('status')}`", f"- elapsed minutes: `{value.get('elapsed_minutes', 0)}`", f"- successful cycles: `{value.get('successful_cycles', 0)}`"])
+    lines = [
+        "# Sentinel Runtime Promotion",
+        "",
+        f"- status: `{value.get('status')}`",
+        f"- runtime stage: `{value.get('runtime_stage')}`",
+        f"- scheduler verification: `{value.get('scheduler_verification_status')}`",
+        f"- scheduler successful cycles: `{value.get('scheduler_successful_cycles', 0)}`",
+        f"- guarded canary started: `{str(value.get('guarded_canary_started', False)).lower()}`",
+        f"- guarded canary successful cycles: `{value.get('guarded_canary_successful_cycles', 0)}`",
+        f"- promotion elapsed minutes: `{value.get('promotion_elapsed_minutes', 0)}`",
+        f"- blockers: `{', '.join(value.get('blockers', [])) or 'none'}`",
+    ]
+    return "\n".join(lines)
 
 
 def render_status(value: Dict[str, Any]) -> str:
