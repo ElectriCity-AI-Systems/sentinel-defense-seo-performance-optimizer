@@ -80,6 +80,8 @@ DEFAULT_SAFE_END_ARCHIVE_SNAPSHOT_JSON = PROJECT_DIR / "reports/latest/safe-end-
 DEFAULT_SAFE_END_ARCHIVE_INTEGRITY_VERIFIER_JSON = PROJECT_DIR / "reports/latest/safe-end-archive-integrity-verifier.json"
 DEFAULT_CONCRETE_SEO_PERFORMANCE_OPTIMIZER_JSON = PROJECT_DIR / "reports/latest/concrete-seo-performance-optimizer.json"
 DEFAULT_SAFE_SFTP_SEO_APPLY_LANE_JSON = PROJECT_DIR / "reports/latest/safe-sftp-seo-apply-lane.json"
+DEFAULT_PRODUCTION_PIPELINE_JSON = PROJECT_DIR / "reports/latest/sentinel-production-pipeline.json"
+DEFAULT_NOWPLAYING_RECOVERY_JSON = PROJECT_DIR / "reports/latest/sentinel-nowplaying-recovery.json"
 PRIVATE_PC_CONFIRMATION_DOCS = (
     PROJECT_DIR / "docs/sentinel-current-state.md",
     PROJECT_DIR / "docs/goal-ok-status.md",
@@ -3887,6 +3889,8 @@ def build_report(
     safe_end_integrity_data, safe_end_integrity_error, safe_end_integrity_exists = read_json(safe_end_archive_integrity_verifier_json)
     concrete_optimizer_data, concrete_optimizer_error, concrete_optimizer_exists = read_json(concrete_seo_performance_optimizer_json)
     safe_sftp_lane_data, safe_sftp_lane_error, safe_sftp_lane_exists = read_json(safe_sftp_seo_apply_lane_json)
+    production_pipeline_data, production_pipeline_error, production_pipeline_exists = read_json(DEFAULT_PRODUCTION_PIPELINE_JSON)
+    nowplaying_recovery_data, nowplaying_recovery_error, nowplaying_recovery_exists = read_json(DEFAULT_NOWPLAYING_RECOVERY_JSON)
 
     # Optional self-comparison: read the previous master report (if any) before
     # it is overwritten. Informational only; never affects current status.
@@ -5440,6 +5444,10 @@ def build_report(
         "concrete_seo_performance_optimizer": concrete_optimizer_summary,
         "safe_sftp_seo_apply_lane_status": safe_sftp_lane_summary.get("status"),
         "safe_sftp_seo_apply_lane": safe_sftp_lane_summary,
+        "production_pipeline_status": production_pipeline_data.get("status") if production_pipeline_exists and isinstance(production_pipeline_data, dict) else "NOT_AVAILABLE",
+        "production_pipeline": production_pipeline_data if production_pipeline_exists and isinstance(production_pipeline_data, dict) else {"present": False},
+        "nowplaying_recovery_status": nowplaying_recovery_data.get("status") if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else "NOT_AVAILABLE",
+        "nowplaying_recovery": nowplaying_recovery_data if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else {"present": False},
         "self_comparison": self_comparison,
         "sources": {
             "website": website_summary,
@@ -8062,6 +8070,29 @@ def render_markdown(report: Dict[str, Any]) -> str:
     lines.extend(render_concrete_seo_performance_optimizer(report.get("concrete_seo_performance_optimizer", {}) if isinstance(report.get("concrete_seo_performance_optimizer"), dict) else {}))
     lines.extend(render_safe_sftp_seo_apply_lane(report.get("safe_sftp_seo_apply_lane", {}) if isinstance(report.get("safe_sftp_seo_apply_lane"), dict) else {}))
 
+    # Production Pipeline and NowPlaying Recovery (Phase 10.20)
+    pipeline = report.get("production_pipeline") if isinstance(report.get("production_pipeline"), dict) else {}
+    nowplaying = report.get("nowplaying_recovery") if isinstance(report.get("nowplaying_recovery"), dict) else {}
+    lines.extend([
+        "## Production Pipeline (Phase 10.20)",
+        "",
+        f"- Pipeline status: `{md_status(pipeline.get('status'))}`",
+        f"- Owner priority: `{md_status(pipeline.get('owner_priority', {}).get('selected_priority'))}`",
+        f"- Runtime level: `{md_status(pipeline.get('runtime', {}).get('autonomy_level'))}`",
+        f"- Timer active: `{str(pipeline.get('runtime', {}).get('systemd_timer_active', False)).lower()}`",
+        f"- LOW_LIVE enabled: `{str(pipeline.get('runtime', {}).get('low_live_apply_enabled', False)).lower()}`",
+        f"- Emergency stop: `{str(pipeline.get('runtime', {}).get('emergency_stop', True)).lower()}`",
+        f"- Breach: `{str(pipeline.get('runtime', {}).get('breach', False)).lower()}`",
+        "",
+        "## NowPlaying Recovery (Phase 10.20)",
+        "",
+        f"- Recovery status: `{md_status(nowplaying.get('status'))}`",
+        f"- Classification: `{md_status(nowplaying.get('classification', {}).get('classification'))}`",
+        f"- Automatic repair allowed: `{str(nowplaying.get('classification', {}).get('automatic_repair_allowed', False)).lower()}`",
+        f"- Repair applied: `{str(nowplaying.get('repair_applied', False)).lower()}`",
+        "",
+    ])
+
     lines.extend(
         [
             "## Sicherheitsgrenzen",
@@ -8504,6 +8535,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--safe-end-archive-integrity-verifier-json", type=Path, default=DEFAULT_SAFE_END_ARCHIVE_INTEGRITY_VERIFIER_JSON)
     parser.add_argument("--concrete-seo-performance-optimizer-json", type=Path, default=DEFAULT_CONCRETE_SEO_PERFORMANCE_OPTIMIZER_JSON)
     parser.add_argument("--safe-sftp-seo-apply-lane-json", type=Path, default=DEFAULT_SAFE_SFTP_SEO_APPLY_LANE_JSON)
+    parser.add_argument("--production-pipeline-json", type=Path, default=DEFAULT_PRODUCTION_PIPELINE_JSON)
+    parser.add_argument("--nowplaying-recovery-json", type=Path, default=DEFAULT_NOWPLAYING_RECOVERY_JSON)
     parser.add_argument("--out-md", type=Path, default=DEFAULT_OUT_MD)
     parser.add_argument("--out-json", type=Path, default=DEFAULT_OUT_JSON)
     parser.add_argument("--history", type=Path, default=DEFAULT_HISTORY)

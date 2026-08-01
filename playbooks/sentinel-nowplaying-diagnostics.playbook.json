@@ -1,0 +1,5 @@
+{
+  "repair_allowed": false,
+  "schema_version": "sentinel-nowplaying-recovery-10.20",
+  "status": "PLAYBOOK_DRAFT"
+}

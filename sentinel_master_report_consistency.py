@@ -592,13 +592,26 @@ def choose_owner_priority(context: Dict[str, Any]) -> Dict[str, Any]:
     website_status = str(context.get("website_status", "UNKNOWN")).upper()
     origin_5xx = int(context.get("origin_5xx") or 0)
     root_504 = int(context.get("root_504") or 0)
+    nowplaying_504 = int(context.get("nowplaying_504") or 0)
+    nowplaying_share = float(context.get("nowplaying_share_percent") or 0.0)
     recent_growth = bool(context.get("recent_significant_growth"))
     low_growth_24h = bool(context.get("24h_low_growth_evidence"))
     if breach:
         selected = "SAFETY_BREACH_ESCALATION"
         reason = "A safety breach is active; no lower-priority operation is recommended."
         next_action = "Stop local operation processing and perform owner safety review."
-        suppressed = ["WEBSITE_ORIGIN_STABILITY", "SEO_TITLE_REVIEW", "META_DESCRIPTION_REVIEW"]
+        suppressed = ["AI_RADIO_NOWPLAYING_RECOVERY", "WEBSITE_ORIGIN_STABILITY", "SEO_TITLE_REVIEW", "META_DESCRIPTION_REVIEW"]
+    elif website_status == "CRITICAL" and nowplaying_504 > 0 and nowplaying_share >= 25:
+        selected = "AI_RADIO_NOWPLAYING_RECOVERY"
+        reason = (
+            f"The current NowPlaying endpoint accounts for {nowplaying_share}% of 5xx "
+            f"({nowplaying_504}/{origin_5xx}) and is the dominant single productive failure path."
+        )
+        next_action = (
+            "Investigate Cloudflare-to-origin timeout for /api/nowplaying/electri-city-ai-electro-radio. "
+            "Local nginx repair is only applicable if this host serves the endpoint."
+        )
+        suppressed = ["SEO_TITLE_REVIEW", "META_DESCRIPTION_REVIEW", "OPEN_GRAPH_REVIEW", "INTERNAL_LINK_REVIEW"]
     elif website_status == "CRITICAL" and (
         origin_5xx > 0 or root_504 > 0 or recent_growth or not low_growth_24h
     ):
@@ -635,6 +648,8 @@ def choose_owner_priority(context: Dict[str, Any]) -> Dict[str, Any]:
             "website_status": website_status,
             "origin_5xx": origin_5xx,
             "root_504": root_504,
+            "nowplaying_504": nowplaying_504,
+            "nowplaying_share_percent": nowplaying_share,
             "recent_significant_growth": recent_growth,
             "24h_low_growth_evidence": low_growth_24h,
             "breach": breach,
@@ -793,10 +808,20 @@ def extract_current_context(master: Dict[str, Any], website: Dict[str, Any]) -> 
     metrics = metric_map(website)
     rolling = website.get("rolling_window_context")
     rolling_status = rolling.get("status") if isinstance(rolling, dict) else None
+    origin = website.get("origin_pressure_breakdown") if isinstance(website.get("origin_pressure_breakdown"), dict) else {}
+    total_5xx = metrics.get("total_5xx", 0)
+    nowplaying_504 = 0
+    for row in origin.get("top_5xx_paths", []):
+        if isinstance(row, dict) and row.get("path") == "/api/nowplaying/electri-city-ai-electro-radio":
+            for sr in row.get("statuses", []):
+                if isinstance(sr, dict) and sr.get("status") == 504:
+                    nowplaying_504 = sr.get("count", 0)
     return {
         "website_status": website.get("overall_status") or master.get("website_status") or "UNKNOWN",
-        "origin_5xx": metrics.get("total_5xx", 0),
+        "origin_5xx": total_5xx,
         "root_504": metrics.get("root_504", 0),
+        "nowplaying_504": nowplaying_504,
+        "nowplaying_share_percent": round((nowplaying_504 / total_5xx) * 100, 2) if total_5xx else 0.0,
         "recent_significant_growth": rolling_status == "RECENT_SIGNIFICANT_GROWTH",
         "24h_low_growth_evidence": bool(
             isinstance(rolling, dict)
@@ -1181,7 +1206,11 @@ def logical_validation(report: Dict[str, Any], public_text: str) -> Dict[str, An
         ),
         "website_priority_precedes_seo": (
             report["source_master"].get("website_status") != "CRITICAL"
-            or report["owner_priority"]["selected_priority"] == "WEBSITE_ORIGIN_STABILITY"
+            or report["owner_priority"]["selected_priority"] in {
+                "WEBSITE_ORIGIN_STABILITY",
+                "AI_RADIO_NOWPLAYING_RECOVERY",
+                "SAFETY_BREACH_ESCALATION",
+            }
         ),
         "public_summary_sanitized": not public_scan(public_text),
         "no_new_waf_rule": report["waf_decision"]["new_waf_rule_recommended"] is False,
@@ -1304,6 +1333,16 @@ def self_test() -> Dict[str, Any]:
         "24h_low_growth_evidence": False,
         "breach": False,
     })
+    test_d2 = choose_owner_priority({
+        "website_status": "CRITICAL",
+        "origin_5xx": 800,
+        "root_504": 50,
+        "nowplaying_504": 400,
+        "nowplaying_share_percent": 50.0,
+        "recent_significant_growth": True,
+        "24h_low_growth_evidence": False,
+        "breach": False,
+    })
     test_e = dict(EMERGENCY_STOP_SEMANTICS)
     synthetic_public = sanitize_public_text(
         "198.51.100.7 origin.internal.example /srv/private/report /api/internal/node-7"
@@ -1359,6 +1398,11 @@ def self_test() -> Dict[str, Any]:
         "test_d_website_priority": (
             test_d["selected_priority"] == "WEBSITE_ORIGIN_STABILITY"
             and "SEO_TITLE_REVIEW" in test_d["suppressed_lower_priorities"]
+        ),
+        "test_d2_nowplaying_priority": (
+            test_d2["selected_priority"] == "AI_RADIO_NOWPLAYING_RECOVERY"
+            and "SEO_TITLE_REVIEW" in test_d2["suppressed_lower_priorities"]
+            and test_d2["inputs"]["nowplaying_504"] == 400
         ),
         "test_e_emergency_stop_semantics": (
             test_e["production_apply_lock"]
