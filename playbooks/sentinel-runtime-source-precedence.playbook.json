@@ -1,0 +1,677 @@
+{
+  "field_ownership": {
+    "autonomy_level": [
+      {
+        "allow_stale_informational": false,
+        "expression": "autonomy_level",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "autonomy_level",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "autonomy_level",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "breach": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.breach",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.breach",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "breach",
+        "source": "state/guarded-autonomy/monitoring-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "circuit_breaker_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "circuit_breaker.status",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "last_cycle.circuit_breaker.status",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "status",
+        "source": "state/guarded-autonomy/circuit-breaker.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "consistency_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "status",
+        "source": "reports/latest/sentinel-master-consistency.json",
+        "source_class": "CURRENT_CONSISTENCY_EVALUATION"
+      }
+    ],
+    "current_growth": [
+      {
+        "allow_stale_informational": false,
+        "expression": "rolling_window_context.growth",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "current_snapshot_id": [
+      {
+        "allow_stale_informational": false,
+        "expression": "derived_monitor_snapshot_id",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "emergency_stop": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.emergency_stop",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.emergency_stop",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "emergency_stop",
+        "source": "state/guarded-autonomy/monitoring-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "guarded_live_autonomy_enabled": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.guarded_live_autonomy_enabled",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.guarded_live_autonomy_enabled",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "high_live_apply_enabled": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.high_live_apply_enabled",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.high_live_apply_enabled",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "http_503": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_status_codes[503]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "http_504": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_status_codes[504]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "http_522": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_status_codes[522]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "http_526": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_status_codes[526]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "last_cycle_id": [
+      {
+        "allow_stale_informational": false,
+        "expression": "last_cycle.cycle_id",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "last_cycle.cycle_id",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "last_decision": [
+      {
+        "allow_stale_informational": false,
+        "expression": "last_cycle.decision",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "last_cycle.decision",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "local_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "overall_status",
+        "source": "inbox/local/local-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "low_live_apply_enabled": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.low_live_apply_enabled",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.low_live_apply_enabled",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "low_live_apply_enabled",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "medium_live_apply_enabled": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.medium_live_apply_enabled",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.medium_live_apply_enabled",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "monitoring_enabled": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.monitoring_enabled",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.monitoring_enabled",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "monitoring_enabled",
+        "source": "state/guarded-autonomy/monitoring-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "nowplaying_504": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_paths[/api/nowplaying/electri-city-ai-electro-radio][504]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "nowplaying_automatic_repair_allowed": [
+      {
+        "allow_stale_informational": true,
+        "expression": "classification.automatic_repair_allowed",
+        "source": "reports/latest/sentinel-nowplaying-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "nowplaying_classification": [
+      {
+        "allow_stale_informational": true,
+        "expression": "classification.classification",
+        "source": "reports/latest/sentinel-nowplaying-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "nowplaying_repair_applied": [
+      {
+        "allow_stale_informational": true,
+        "expression": "repair_applied",
+        "source": "reports/latest/sentinel-nowplaying-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "origin_diagnostic_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "status",
+        "source": "reports/latest/sentinel-origin-failure-diagnostics.json",
+        "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
+      }
+    ],
+    "origin_tls_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "origin_tls_diagnostic.status",
+        "source": "reports/latest/sentinel-origin-failure-diagnostics.json",
+        "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
+      }
+    ],
+    "production_apply_lock": [
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.production_apply_lock",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "flags.production_apply_lock",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "production_apply_lock",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "promotion_blockers": [
+      {
+        "allow_stale_informational": true,
+        "expression": "blockers",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "promotion.blockers",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "promotion_status": [
+      {
+        "allow_stale_informational": true,
+        "expression": "status",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "promotion.status",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "rollback_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "rollback_status.status",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "rollback.status",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "rolling_window_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "rolling_window_context.status",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "runtime_stage": [
+      {
+        "allow_stale_informational": false,
+        "expression": "activation_stage",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": false,
+        "expression": "activation_stage",
+        "source": "state/adaptive-learning/guarded_autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "runtime_stage",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "activation_stage",
+        "source": "state/guarded-autonomy/monitoring-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "scheduler_successful_cycles": [
+      {
+        "allow_stale_informational": true,
+        "expression": "successful_cycles",
+        "source": "state/guarded-autonomy/scheduler-cycles.json",
+        "source_class": "CURRENT_SCHEDULER_STATE"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "scheduler_successful_cycles",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "scheduler_verification_status": [
+      {
+        "allow_stale_informational": true,
+        "expression": "status",
+        "source": "state/guarded-autonomy/scheduler-cycles.json",
+        "source_class": "CURRENT_SCHEDULER_STATE"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "scheduler_verification_status",
+        "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "status",
+        "source": "state/guarded-autonomy/scheduler-verification.json",
+        "source_class": "CURRENT_SCHEDULER_STATE"
+      }
+    ],
+    "source_map_404": [
+      {
+        "allow_stale_informational": false,
+        "expression": "metrics[map_404]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "systemd_timer_active": [
+      {
+        "allow_stale_informational": false,
+        "expression": "systemd.timer_active",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "systemd.timer_active",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "timer_active",
+        "source": "state/guarded-autonomy/monitoring-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "checks.timer_active",
+        "source": "state/guarded-autonomy/scheduler-cycles.json",
+        "source_class": "CURRENT_SCHEDULER_STATE"
+      }
+    ],
+    "systemd_timer_enabled": [
+      {
+        "allow_stale_informational": false,
+        "expression": "systemd.timer_enabled",
+        "source": "reports/latest/sentinel-guarded-autonomy.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "systemd.install_status",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "top_failure_paths": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_paths[top10]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "total_5xx": [
+      {
+        "allow_stale_informational": false,
+        "expression": "metrics[total_5xx]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "website_correlation_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "correlation_status",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "website_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "overall_status",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "wp_users_me_504": [
+      {
+        "allow_stale_informational": false,
+        "expression": "top_5xx_paths[/wp-json/wp/v2/users/me][504]",
+        "source": "reports/latest/sentinel-defense-report.json",
+        "source_class": "CURRENT_WEBSITE_EVIDENCE"
+      }
+    ],
+    "wp_users_me_classification": [
+      {
+        "allow_stale_informational": false,
+        "expression": "wp_users_me_diagnostic.classification",
+        "source": "reports/latest/sentinel-origin-failure-diagnostics.json",
+        "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
+      }
+    ],
+    "write_canary_status": [
+      {
+        "allow_stale_informational": true,
+        "expression": "status",
+        "source": "state/guarded-autonomy/write-canary.json",
+        "source_class": "CURRENT_RUNTIME"
+      },
+      {
+        "allow_stale_informational": true,
+        "expression": "write_canary.status",
+        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ]
+  },
+  "name": "sentinel-runtime-source-precedence",
+  "owner_priority_ladder": [
+    {
+      "condition": "breach or emergency state",
+      "priority": "SAFETY_BREACH_ESCALATION",
+      "rank": 1
+    },
+    {
+      "condition": "website outage or CRITICAL website status",
+      "priority": "WEBSITE_ORIGIN_STABILITY",
+      "rank": 2
+    },
+    {
+      "condition": "dominant current origin failures",
+      "priority": "WEBSITE_ORIGIN_STABILITY",
+      "rank": 3
+    },
+    {
+      "condition": "runtime or scheduler failure",
+      "priority": "RUNTIME_STABILITY_REVIEW",
+      "rank": 4
+    },
+    {
+      "condition": "current TLS failure",
+      "priority": "ORIGIN_TLS_REVIEW",
+      "rank": 5
+    },
+    {
+      "condition": "NowPlaying or API origin stability",
+      "priority": "AI_RADIO_NOWPLAYING_RECOVERY",
+      "rank": 6
+    },
+    {
+      "condition": "performance degradation",
+      "priority": "PERFORMANCE_DEGRADATION_REVIEW",
+      "rank": 7
+    },
+    {
+      "condition": "security diagnostic review",
+      "priority": "SECURITY_DIAGNOSTIC_REVIEW",
+      "rank": 8
+    },
+    {
+      "condition": "SEO or editorial work",
+      "priority": "SEO_TITLE_REVIEW",
+      "rank": 9
+    }
+  ],
+  "precedence": [
+    {
+      "description": "current live runtime state",
+      "source_class": "CURRENT_RUNTIME",
+      "tier": 1
+    },
+    {
+      "description": "current scheduler state",
+      "source_class": "CURRENT_SCHEDULER_STATE",
+      "tier": 2
+    },
+    {
+      "description": "current production pipeline",
+      "source_class": "CURRENT_PRODUCTION_PIPELINE",
+      "tier": 3
+    },
+    {
+      "description": "current website monitor evidence",
+      "source_class": "CURRENT_WEBSITE_EVIDENCE",
+      "tier": 4
+    },
+    {
+      "description": "current origin diagnostics",
+      "source_class": "CURRENT_ORIGIN_DIAGNOSTICS",
+      "tier": 5
+    },
+    {
+      "description": "current recovery modules",
+      "source_class": "CURRENT_RECOVERY_MODULE",
+      "tier": 6
+    },
+    {
+      "description": "current consistency evaluation",
+      "source_class": "CURRENT_CONSISTENCY_EVALUATION",
+      "tier": 7
+    },
+    {
+      "description": "stale legacy reports, informational only",
+      "source_class": "LEGACY_HISTORICAL",
+      "tier": 8
+    }
+  ],
+  "schema_version": "sentinel-canonical-truth-10.21",
+  "source_registry": {
+    "consistency": {
+      "primary": "reports/latest/sentinel-master-consistency.json"
+    },
+    "legacy": {
+      "legacy_ai_radio": "reports/latest/ai-radio-api-timeout-diagnosis.json",
+      "legacy_autonomy_policy": "reports/latest/autonomy-policy-report.json",
+      "legacy_autonomy_runtime_lock": "reports/latest/autonomy-runtime-lock-report.json",
+      "legacy_microcache_status": "reports/latest/ai-radio-nowplaying-microcache-status.json",
+      "legacy_owner_daily_action": "reports/latest/owner-daily-action-summary.json",
+      "legacy_scheduler_plan": "reports/latest/safe-draft-autonomy-scheduler-plan.json",
+      "legacy_sourcemap": "reports/latest/sourcemap-prevention-report.json",
+      "legacy_timer_draft": "reports/latest/safe-draft-autonomy-timer-draft-report.json",
+      "scheduler_verification": "state/guarded-autonomy/scheduler-verification.json"
+    },
+    "nowplaying": {
+      "primary": "reports/latest/sentinel-nowplaying-recovery.json"
+    },
+    "origin": {
+      "primary": "reports/latest/sentinel-origin-failure-diagnostics.json"
+    },
+    "pipeline": {
+      "primary": "reports/latest/sentinel-production-pipeline.json"
+    },
+    "runtime": {
+      "primary": "reports/latest/sentinel-guarded-autonomy.json",
+      "promotion": "state/guarded-autonomy/runtime-promotion.json",
+      "secondary": "reports/latest/sentinel-guarded-runtime-activation.json",
+      "write_canary": "state/guarded-autonomy/write-canary.json"
+    },
+    "scheduler": {
+      "legacy_scheduler": "state/guarded-autonomy/scheduler-verification.json",
+      "primary": "state/guarded-autonomy/scheduler-cycles.json"
+    },
+    "website": {
+      "local": "inbox/local/local-defense-report.json",
+      "primary": "reports/latest/sentinel-defense-report.json"
+    }
+  },
+  "status": "PLAYBOOK_ACTIVE"
+}

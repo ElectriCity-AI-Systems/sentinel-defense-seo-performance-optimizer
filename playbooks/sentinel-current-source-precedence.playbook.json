@@ -1,4 +1,116 @@
 {
-  "schema_version": "sentinel-production-pipeline-10.20",
-  "status": "PLAYBOOK_DRAFT"
+  "execution_boundaries": {
+    "authorization_header_storage": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "high_activation": false,
+    "low_live_activation": false,
+    "medium_activation": false,
+    "nginx_change": false,
+    "phase_type": "reporting_state_resolution_source_precedence_diagnostic_validation",
+    "systemd_change": false,
+    "timer_change": false,
+    "tls_change": false,
+    "waf_rule_change": false,
+    "wordpress_write": false
+  },
+  "fixed_order": [
+    "collect_current_inputs",
+    "evaluate_freshness",
+    "build_canonical_truth",
+    "validate_canonical_invariants",
+    "determine_owner_priority",
+    "build_master_report",
+    "build_daily_summary",
+    "build_public_summary",
+    "audit"
+  ],
+  "name": "sentinel-current-source-precedence",
+  "precedence": [
+    {
+      "description": "current live runtime state",
+      "source_class": "CURRENT_RUNTIME",
+      "tier": 1
+    },
+    {
+      "description": "current scheduler state",
+      "source_class": "CURRENT_SCHEDULER_STATE",
+      "tier": 2
+    },
+    {
+      "description": "current production pipeline",
+      "source_class": "CURRENT_PRODUCTION_PIPELINE",
+      "tier": 3
+    },
+    {
+      "description": "current website monitor evidence",
+      "source_class": "CURRENT_WEBSITE_EVIDENCE",
+      "tier": 4
+    },
+    {
+      "description": "current origin diagnostics",
+      "source_class": "CURRENT_ORIGIN_DIAGNOSTICS",
+      "tier": 5
+    },
+    {
+      "description": "current recovery modules",
+      "source_class": "CURRENT_RECOVERY_MODULE",
+      "tier": 6
+    },
+    {
+      "description": "current consistency evaluation",
+      "source_class": "CURRENT_CONSISTENCY_EVALUATION",
+      "tier": 7
+    },
+    {
+      "description": "stale legacy reports, informational only",
+      "source_class": "LEGACY_HISTORICAL",
+      "tier": 8
+    }
+  ],
+  "rule": "canonical truth precedes every summary; no legacy fallback value is permitted",
+  "schema_version": "sentinel-production-pipeline-10.21",
+  "source_registry": {
+    "consistency": {
+      "primary": "reports/latest/sentinel-master-consistency.json"
+    },
+    "legacy": {
+      "legacy_ai_radio": "reports/latest/ai-radio-api-timeout-diagnosis.json",
+      "legacy_autonomy_policy": "reports/latest/autonomy-policy-report.json",
+      "legacy_autonomy_runtime_lock": "reports/latest/autonomy-runtime-lock-report.json",
+      "legacy_microcache_status": "reports/latest/ai-radio-nowplaying-microcache-status.json",
+      "legacy_owner_daily_action": "reports/latest/owner-daily-action-summary.json",
+      "legacy_scheduler_plan": "reports/latest/safe-draft-autonomy-scheduler-plan.json",
+      "legacy_sourcemap": "reports/latest/sourcemap-prevention-report.json",
+      "legacy_timer_draft": "reports/latest/safe-draft-autonomy-timer-draft-report.json",
+      "scheduler_verification": "state/guarded-autonomy/scheduler-verification.json"
+    },
+    "nowplaying": {
+      "primary": "reports/latest/sentinel-nowplaying-recovery.json"
+    },
+    "origin": {
+      "primary": "reports/latest/sentinel-origin-failure-diagnostics.json"
+    },
+    "pipeline": {
+      "primary": "reports/latest/sentinel-production-pipeline.json"
+    },
+    "runtime": {
+      "primary": "reports/latest/sentinel-guarded-autonomy.json",
+      "promotion": "state/guarded-autonomy/runtime-promotion.json",
+      "secondary": "reports/latest/sentinel-guarded-runtime-activation.json",
+      "write_canary": "state/guarded-autonomy/write-canary.json"
+    },
+    "scheduler": {
+      "legacy_scheduler": "state/guarded-autonomy/scheduler-verification.json",
+      "primary": "state/guarded-autonomy/scheduler-cycles.json"
+    },
+    "website": {
+      "local": "inbox/local/local-defense-report.json",
+      "primary": "reports/latest/sentinel-defense-report.json"
+    }
+  },
+  "status": "PLAYBOOK_ACTIVE"
 }

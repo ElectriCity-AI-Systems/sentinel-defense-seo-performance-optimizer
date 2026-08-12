@@ -1,0 +1,64 @@
+{
+  "execution_boundaries": {
+    "authorization_header_storage": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "high_activation": false,
+    "low_live_activation": false,
+    "medium_activation": false,
+    "nginx_change": false,
+    "phase_type": "reporting_state_resolution_source_precedence_diagnostic_validation",
+    "systemd_change": false,
+    "timer_change": false,
+    "tls_change": false,
+    "waf_rule_change": false,
+    "wordpress_write": false
+  },
+  "fail_closed": {
+    "rule": "name the missing fields; never substitute a legacy value",
+    "status": "CANONICAL_TRUTH_INCOMPLETE"
+  },
+  "forbidden": [
+    "legacy overwrite of current runtime fields",
+    "legacy overwrite of owner priority",
+    "legacy overwrite of systemd state",
+    "legacy overwrite of emergency stop state",
+    "legacy overwrite of autonomy level",
+    "legacy overwrite of website metrics",
+    "stale measurements presented as current measurements"
+  ],
+  "name": "sentinel-canonical-runtime-truth",
+  "pipeline": [
+    "evidence",
+    "freshness",
+    "source_precedence",
+    "canonical_truth",
+    "invariant_validation",
+    "owner_priority",
+    "master_report",
+    "daily_summary",
+    "public_summary"
+  ],
+  "principle": "one operational fact = one canonical current value = one authoritative source = traceable provenance",
+  "required_fields": [
+    "runtime_stage",
+    "autonomy_level",
+    "monitoring_enabled",
+    "systemd_timer_active",
+    "scheduler_verification_status",
+    "low_live_apply_enabled",
+    "production_apply_lock",
+    "emergency_stop",
+    "breach",
+    "write_canary_status",
+    "promotion_status",
+    "website_status",
+    "total_5xx",
+    "rolling_window_status"
+  ],
+  "schema_version": "sentinel-canonical-truth-10.21",
+  "status": "PLAYBOOK_ACTIVE"
+}

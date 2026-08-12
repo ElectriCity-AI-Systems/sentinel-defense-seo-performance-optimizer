@@ -1,0 +1,115 @@
+{
+  "field_claims": {
+    "autonomy_level": [
+      {
+        "expression": "current_autonomy_level",
+        "source": "reports/latest/autonomy-policy-report.json"
+      }
+    ],
+    "emergency_stop": [
+      {
+        "expression": "emergency_stop",
+        "source": "reports/latest/autonomy-runtime-lock-report.json"
+      },
+      {
+        "expression": "emergency_stop",
+        "source": "reports/latest/safe-draft-autonomy-scheduler-plan.json"
+      }
+    ],
+    "low_live_apply_enabled": [
+      {
+        "expression": "live_apply_enabled",
+        "source": "reports/latest/autonomy-runtime-lock-report.json"
+      }
+    ],
+    "nowplaying_504": [
+      {
+        "expression": "nowplaying_504",
+        "source": "reports/latest/ai-radio-api-timeout-diagnosis.json"
+      }
+    ],
+    "owner_priority": [
+      {
+        "expression": "recommended_next_owner_action",
+        "source": "reports/latest/owner-daily-action-summary.json"
+      }
+    ],
+    "scheduler_verification_status": [
+      {
+        "expression": "status",
+        "source": "state/guarded-autonomy/scheduler-verification.json"
+      }
+    ],
+    "source_map_404": [
+      {
+        "expression": "map_404_metric.value",
+        "source": "reports/latest/sourcemap-prevention-report.json"
+      }
+    ],
+    "systemd_timer_active": [
+      {
+        "expression": "timer_installation_status",
+        "source": "reports/latest/safe-draft-autonomy-scheduler-plan.json"
+      },
+      {
+        "expression": "timer_installation_status",
+        "source": "reports/latest/safe-draft-autonomy-timer-draft-report.json"
+      }
+    ]
+  },
+  "freshness_vocabulary": {
+    "CURRENT": "Within the source-specific current window and usable as canonical input.",
+    "INVALID": "Source is unreadable or its timestamp is unusable.",
+    "MISSING": "Expected source is absent; no current fact is inferred from it.",
+    "STALE_EXCLUDED_FROM_MASTER_STATUS": "Far older than the current window; excluded from master status.",
+    "STALE_INFORMATIONAL": "Older than the current window; informational only, no operational effect.",
+    "SUPERSEDED": "Source may still be time-wise reasonably fresh, but for this specific field it has been replaced by a more authoritative source."
+  },
+  "legacy_modules": [
+    {
+      "description": "Phase 1.5 autonomy policy report (LEVEL_1_DRAFT_ONLY era).",
+      "source": "reports/latest/autonomy-policy-report.json"
+    },
+    {
+      "description": "Phase 3.5 owner runtime lock report (emergency stop era).",
+      "source": "reports/latest/autonomy-runtime-lock-report.json"
+    },
+    {
+      "description": "Phase 3.8 review-only scheduler plan (timer not installed era).",
+      "source": "reports/latest/safe-draft-autonomy-scheduler-plan.json"
+    },
+    {
+      "description": "Phase 3.9 review-only systemd timer draft.",
+      "source": "reports/latest/safe-draft-autonomy-timer-draft-report.json"
+    },
+    {
+      "description": "Phase 2.8 owner daily action summary (SEO checklist era).",
+      "source": "reports/latest/owner-daily-action-summary.json"
+    },
+    {
+      "description": "SourceMap prevention diagnostic from the .map-404 era.",
+      "source": "reports/latest/sourcemap-prevention-report.json"
+    },
+    {
+      "description": "AI-Radio API timeout diagnosis from the microcache deployment era.",
+      "source": "reports/latest/ai-radio-api-timeout-diagnosis.json"
+    },
+    {
+      "description": "NowPlaying microcache deployment status record.",
+      "source": "reports/latest/ai-radio-nowplaying-microcache-status.json"
+    },
+    {
+      "description": "Earlier scheduler verification state, superseded by scheduler-cycles.",
+      "source": "state/guarded-autonomy/scheduler-verification.json"
+    }
+  ],
+  "name": "sentinel-legacy-supersession",
+  "retention": [
+    "never delete historical components",
+    "never delete old reports",
+    "never delete old state files",
+    "classify only: CURRENT / SUPERSEDED / STALE_INFORMATIONAL / STALE_EXCLUDED"
+  ],
+  "schema_version": "sentinel-canonical-truth-10.21",
+  "status": "PLAYBOOK_ACTIVE"
+}

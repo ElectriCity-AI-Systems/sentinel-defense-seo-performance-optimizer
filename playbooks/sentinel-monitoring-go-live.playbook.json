@@ -1,4 +1,40 @@
 {
-  "schema_version": "sentinel-production-pipeline-10.20",
-  "status": "PLAYBOOK_DRAFT"
+  "execution_boundaries": {
+    "authorization_header_storage": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "high_activation": false,
+    "low_live_activation": false,
+    "medium_activation": false,
+    "nginx_change": false,
+    "phase_type": "reporting_state_resolution_source_precedence_diagnostic_validation",
+    "systemd_change": false,
+    "timer_change": false,
+    "tls_change": false,
+    "waf_rule_change": false,
+    "wordpress_write": false
+  },
+  "fixed_order": [
+    "collect_current_inputs",
+    "evaluate_freshness",
+    "build_canonical_truth",
+    "validate_canonical_invariants",
+    "determine_owner_priority",
+    "build_master_report",
+    "build_daily_summary",
+    "build_public_summary",
+    "audit"
+  ],
+  "monitoring_contract": {
+    "never_from": "Level-1 draft-only modules",
+    "promotion_requires": "cloudflare write canary unblocked",
+    "runtime_fields_from": "current guarded runtime state"
+  },
+  "name": "sentinel-monitoring-go-live",
+  "rule": "canonical truth precedes every summary; no legacy fallback value is permitted",
+  "schema_version": "sentinel-production-pipeline-10.21",
+  "status": "PLAYBOOK_ACTIVE"
 }

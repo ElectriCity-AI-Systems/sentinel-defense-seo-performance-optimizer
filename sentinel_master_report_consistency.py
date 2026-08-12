@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import sentinel_canonical_truth as canonical_truth
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 SCHEMA_VERSION = "sentinel-master-report-consistency-10.16"
@@ -86,6 +88,11 @@ FRESHNESS_LIMITS = {
     "stale_informational_max_seconds": 7 * 24 * 60 * 60,
 }
 
+SUPERSEDED = "SUPERSEDED"
+
+# Module execution boundary, not runtime state. Phase 10.21: the canonical runtime
+# emergency stop, breach and autonomy level are resolved live through
+# sentinel_canonical_truth.resolve_runtime_flags() and are reported separately.
 SAFETY_FLAGS = {
     "live_apply": False,
     "emergency_stop": True,
@@ -657,6 +664,42 @@ def choose_owner_priority(context: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def canonical_owner_priority(local_choice: Dict[str, Any]) -> Dict[str, Any]:
+    """Phase 10.21: owner priority is owned by the canonical resolver.
+
+    The local evaluation is preserved as `local_evaluation` for provenance, but the
+    canonical priority decides. If the canonical snapshot is unavailable, the local
+    choice is used and explicitly labelled as a fallback.
+    """
+    snapshot = canonical_truth.load_canonical_truth()
+    block = (snapshot.get("canonical", {}) or {}).get("owner_priority") if isinstance(snapshot, dict) else None
+    if not isinstance(block, dict) or block.get("resolution") != "RESOLVED":
+        return {
+            **local_choice,
+            "priority_source": "LOCAL_EVALUATION_CANONICAL_UNAVAILABLE",
+            "canonical_available": False,
+        }
+    selected = block.get("value")
+    return {
+        "status": f"OWNER_PRIORITY_{selected}",
+        "selected_priority": selected,
+        "rank": block.get("rank"),
+        "reason": block.get("rank_reason"),
+        "next_owner_action": local_choice.get("next_owner_action"),
+        "suppressed_lower_priorities": block.get("suppressed_lower_priorities", []),
+        "legacy_seo_checklist_allowed": block.get("legacy_seo_checklist_allowed", False),
+        "inputs": block.get("inputs", {}),
+        "priority_source": "CANONICAL_TRUTH",
+        "canonical_available": True,
+        "canonical_snapshot_at": snapshot.get("generated_at_utc"),
+        "local_evaluation": {
+            "selected_priority": local_choice.get("selected_priority"),
+            "reason": local_choice.get("reason"),
+            "agrees_with_canonical": local_choice.get("selected_priority") == selected,
+        },
+    }
+
+
 def waf_decision(website: Dict[str, Any]) -> Dict[str, Any]:
     failure_modes = website.get("top_5xx_failure_modes")
     modes = {
@@ -828,7 +871,48 @@ def extract_current_context(master: Dict[str, Any], website: Dict[str, Any]) -> 
             and rolling.get("ok_eligible")
             and rolling_status not in {"RECENT_SIGNIFICANT_GROWTH", "NEW_GROWTH_PRESENT"}
         ),
-        "breach": SAFETY_FLAGS["breach"],
+        "breach": runtime_flags().get("breach") is True,
+    }
+
+
+_RUNTIME_FLAGS_CACHE: Dict[str, Any] = {}
+
+
+def runtime_flags_report() -> Dict[str, Any]:
+    """Canonical runtime flags with provenance, resolved once per process run."""
+    if not _RUNTIME_FLAGS_CACHE:
+        _RUNTIME_FLAGS_CACHE.update(canonical_truth.resolve_runtime_flags())
+    return dict(_RUNTIME_FLAGS_CACHE)
+
+
+def runtime_flags() -> Dict[str, Any]:
+    return runtime_flags_report().get("flags", {})
+
+
+def build_safety_block() -> Dict[str, Any]:
+    """Module boundary plus canonical runtime state, never a hardcoded runtime value."""
+    runtime = runtime_flags_report()
+    flags = runtime.get("flags", {})
+    provenance = runtime.get("provenance", {})
+    return {
+        **SAFETY_FLAGS,
+        "semantics": (
+            "module_execution_boundary_not_runtime_state: emergency_stop here means this module "
+            "performs no productive apply; the canonical runtime emergency stop is "
+            "runtime_emergency_stop"
+        ),
+        "module_productive_apply_lock": True,
+        "runtime_emergency_stop": flags.get("emergency_stop"),
+        "runtime_breach": flags.get("breach"),
+        "runtime_autonomy_level": flags.get("autonomy_level"),
+        "runtime_stage": flags.get("runtime_stage"),
+        "runtime_systemd_timer_active": flags.get("systemd_timer_active"),
+        "runtime_low_live_apply_enabled": flags.get("low_live_apply_enabled"),
+        "runtime_production_apply_lock": flags.get("production_apply_lock"),
+        "runtime_flags_status": runtime.get("status"),
+        "runtime_flags_unresolved": runtime.get("unresolved_fields", []),
+        "runtime_emergency_stop_source": provenance.get("emergency_stop", {}).get("source"),
+        "runtime_breach_source": provenance.get("breach", {}).get("source"),
     }
 
 
@@ -853,6 +937,15 @@ def evaluate_safety_evidence() -> Dict[str, Any]:
 def build_public_summary(report: Dict[str, Any]) -> str:
     priority = report["owner_priority"]
     safety = report["safety"]
+    emergency_stop = safety.get("runtime_emergency_stop")
+    emergency_text = (
+        "active" if emergency_stop is True
+        else "not active" if emergency_stop is False
+        else "unknown"
+    )
+    monitoring_text = (
+        "active" if safety.get("runtime_systemd_timer_active") is True else "not confirmed"
+    )
     text = f"""# Sentinel Public Status Summary
 
 The website currently shows elevated origin timeout pressure. Sentinel remains breach-free and live automation remains disabled.
@@ -860,7 +953,8 @@ The website currently shows elevated origin timeout pressure. Sentinel remains b
 - operational priority: website stability and owner-led diagnosis
 - local analysis and sanitized reporting: allowed
 - productive or remote execution: blocked
-- emergency stop: active
+- continuous monitoring: {monitoring_text}
+- emergency stop: {emergency_text}
 - new broad security rule: not recommended from the current evidence
 
 The next step is manual correlation of hosting, application-runtime and content-management logs, followed by a new complete observation window. The projected recheck time is not an automatic OK transition.
@@ -878,7 +972,9 @@ def build_report() -> Dict[str, Any]:
     master_text = MASTER_JSON.read_text(encoding="utf-8", errors="replace") if MASTER_JSON.exists() else ""
     freshness = evaluate_freshness(master, website)
     apply_semantics = evaluate_apply_semantics(master)
-    owner_priority = choose_owner_priority(extract_current_context(master, website))
+    owner_priority = canonical_owner_priority(
+        choose_owner_priority(extract_current_context(master, website))
+    )
     rolling = build_rolling_window(website)
     metrics = metric_map(website)
     root = find_path_row(website, "/")
@@ -942,8 +1038,9 @@ def build_report() -> Dict[str, Any]:
             "recommended_files": RECOMMENDED_GIT_FILES,
             "excluded_prefixes": ["reports/", "state/", "audit/", "exports/", "backups/", "snapshots/"],
         },
-        "safety": dict(SAFETY_FLAGS),
+        "safety": build_safety_block(),
         "safety_evidence": evaluate_safety_evidence(),
+        "canonical_runtime": runtime_flags_report(),
     }
     report["known_missing_evidence"] = [item for item in report["known_missing_evidence"] if item]
     public_text = build_public_summary(report)

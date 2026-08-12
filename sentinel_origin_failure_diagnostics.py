@@ -16,9 +16,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import sentinel_canonical_truth as canonical_truth
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
-SCHEMA_VERSION = "sentinel-origin-failure-diagnostics-10.17"
+SCHEMA_VERSION = "sentinel-origin-failure-diagnostics-10.17.1"
 
 REPORT_DIR = PROJECT_DIR / "reports/latest"
 STATE_DIR = PROJECT_DIR / "state/adaptive-learning"
@@ -44,10 +46,13 @@ STATUS_REPORTS = {
     526: REPORT_DIR / "sentinel-origin-526-tls-analysis.md",
 }
 PATH_MD = REPORT_DIR / "sentinel-origin-path-correlation.md"
+WP_USERS_ME_MD = REPORT_DIR / "sentinel-origin-wp-users-me-classification.md"
 ACTOR_MD = REPORT_DIR / "sentinel-origin-actor-correlation.md"
 TIMELINE_MD = REPORT_DIR / "sentinel-origin-timeline.md"
 OWNER_PLAN_MD = REPORT_DIR / "sentinel-origin-owner-action-plan.md"
 EVIDENCE_GAP_MD = REPORT_DIR / "sentinel-origin-evidence-gap.md"
+IONOS_EVIDENCE_JSON = REPORT_DIR / "sentinel-ionos-webspace-owner-evidence.json"
+IONOS_ANALYSIS_MD = REPORT_DIR / "sentinel-ionos-webspace-action-classification.md"
 PUBLIC_MD = REPORT_DIR / "sentinel-origin-public-sanitized-summary.md"
 VALIDATION_MD = REPORT_DIR / "sentinel-origin-validation.md"
 
@@ -67,10 +72,12 @@ OUTPUT_MARKDOWN = (
     REPORT_MD,
     *STATUS_REPORTS.values(),
     PATH_MD,
+    WP_USERS_ME_MD,
     ACTOR_MD,
     TIMELINE_MD,
     OWNER_PLAN_MD,
     EVIDENCE_GAP_MD,
+    IONOS_ANALYSIS_MD,
     PUBLIC_MD,
     VALIDATION_MD,
 )
@@ -93,12 +100,54 @@ SECRET_PATH_PARTS = (
 SECRET_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
 SELF_OUTPUT_NAMES = {path.name for path in (REPORT_JSON, *OUTPUT_MARKDOWN, STATE_JSON, LATEST_STATE_JSON, HISTORY_JSON, AUDIT_JSONL)}
 
+WP_USERS_ME_PATH = "/wp-json/wp/v2/users/me"
+WP_USERS_ME_CLASSIFICATIONS = (
+    "WP_USERS_ME_EXPECTED_ADMIN_TRAFFIC",
+    "WP_USERS_ME_FRONTEND_DEPENDENCY",
+    "WP_USERS_ME_BOT_OR_SCANNER",
+    "WP_USERS_ME_PLUGIN_POLLING",
+    "WP_USERS_ME_ORIGIN_TIMEOUT",
+    "WP_USERS_ME_EVIDENCE_INSUFFICIENT",
+)
+# Order in which simultaneously matching classifications are reported as primary.
+WP_USERS_ME_CLASSIFICATION_PRIORITY = (
+    "WP_USERS_ME_ORIGIN_TIMEOUT",
+    "WP_USERS_ME_BOT_OR_SCANNER",
+    "WP_USERS_ME_PLUGIN_POLLING",
+    "WP_USERS_ME_FRONTEND_DEPENDENCY",
+    "WP_USERS_ME_EXPECTED_ADMIN_TRAFFIC",
+    "WP_USERS_ME_EVIDENCE_INSUFFICIENT",
+)
+WP_USERS_ME_FORBIDDEN_KEYS = (
+    "cookie", "authorization", "auth_header", "token", "bearer", "session",
+    "user_id", "userid", "user_login", "username", "email", "nonce", "password",
+)
+WP_USERS_ME_PRIVACY_GUARANTEES = {
+    "cookies_stored": False,
+    "authorization_headers_stored": False,
+    "tokens_stored": False,
+    "user_ids_collected": False,
+    "productive_rule_applied": False,
+    "diagnosis_only": True,
+}
+
+FRESHNESS_THRESHOLDS_SECONDS = {
+    "current": 24 * 60 * 60,
+    "stale_informational": 7 * 24 * 60 * 60,
+}
+
+IONOS_SEQUENCE_MIN_PATHS = 3
+
 DELTA_THRESHOLDS = {
     "significant_absolute": 25,
     "significant_percent": 25.0,
     "stable_absolute_tolerance": 0,
 }
 
+# Module execution boundary, not runtime state. These flags describe what THIS
+# module may do (nothing productive). Phase 10.21: the runtime emergency stop,
+# breach and autonomy level are canonical runtime fields and are resolved live via
+# sentinel_canonical_truth.resolve_runtime_flags() — never hardcoded here.
 SAFETY_FLAGS = {
     "live_apply": False,
     "emergency_stop": True,
@@ -108,6 +157,11 @@ SAFETY_FLAGS = {
     "low_live_executable": False,
     "breach": False,
 }
+SAFETY_FLAGS_SEMANTICS = (
+    "module_execution_boundary_not_runtime_state: emergency_stop here means this module "
+    "behaves as if productive apply were locked; the canonical runtime emergency stop is "
+    "reported separately as runtime_emergency_stop"
+)
 
 EXECUTION_BOUNDARIES = {
     "production_apply_lock": True,
@@ -393,20 +447,44 @@ def calculate_delta(previous: Optional[int], current: Optional[int]) -> Dict[str
     }
 
 
+def normalize_evidence_path(path: Any) -> str:
+    value = str(path or "unknown").strip()
+    value = value.split("?", 1)[0].split("#", 1)[0]
+    if not value.startswith("/"):
+        value = "/" + value
+    value = re.sub(r"/{2,}", "/", value)
+    if value != "/":
+        value = value.rstrip("/")
+    return value or "/"
+
+
+def is_scanner_probe_path(path: str) -> bool:
+    lowered = normalize_evidence_path(path).lower()
+    scanner_markers = (
+        "/.env", "/.git", "wp-config", "alfacgiapi", "/vendor/phpunit/",
+        "phpinfo.php", "wp-plain.php", "/seotheme/db.php", "/fix/up.php",
+        "/apikey.php", "/apismtp.php", ".php.suspected",
+    )
+    return any(marker in lowered for marker in scanner_markers) or bool(
+        re.fullmatch(r"/atg-[a-z0-9]+\.html", lowered)
+    )
+
+
 def classify_path(path: str) -> str:
-    lowered = path.lower()
-    if path == "/":
+    normalized = normalize_evidence_path(path)
+    lowered = normalized.lower()
+    if normalized == "/":
         return "frontpage"
     if lowered.startswith("/wp-login.php"):
         return "wordpress_login"
+    if is_scanner_probe_path(normalized):
+        return "scanner_or_malware_probe"
     if lowered.startswith("/wp-admin/"):
         return "wordpress_admin_asset"
     if re.fullmatch(r"/page/\d+/?", lowered):
         return "wordpress_legacy_pagination"
     if "oembed" in lowered or lowered.startswith("/wp-json/"):
         return "wordpress_rest_or_oembed"
-    if any(marker in lowered for marker in ("alfacgiapi", "/.env", "shell.php", "wp-config")):
-        return "scanner_or_malware_probe"
     if lowered.startswith("/api/"):
         return "internal_api"
     if re.search(r"\.(?:css|js|png|jpg|jpeg|gif|svg|webp|ico|woff2?)(?:\?|$)", lowered):
@@ -445,9 +523,10 @@ def infer_status_dimension(path_row: Dict[str, Any], dimension_key: str, label_k
                 remaining_dimensions.pop(label, None)
                 changed = True
     if len(remaining_dimensions) == 1:
-        label = next(iter(remaining_dimensions))
-        for code in remaining_statuses:
-            assignments[code] = label
+        label, dimension_count = next(iter(remaining_dimensions.items()))
+        if dimension_count == sum(remaining_statuses.values()):
+            for code in remaining_statuses:
+                assignments[code] = label
     return assignments
 
 
@@ -458,30 +537,37 @@ def correlate_paths(report: Dict[str, Any], generated_at: Optional[str]) -> List
             continue
         path = str(path_row.get("path") or "unknown")
         cache_map = infer_status_dimension(path_row, "cache_status", "cache_status")
-        actor_counts = list_count(path_row.get("actor_signal_counts", []), "actor_signal")
-        ua_counts = list_count(path_row.get("user_agent_groups", []), "group")
-        country_counts = list_count(path_row.get("countries", []), "country")
-        request_shapes = list_count(path_row.get("request_shape_counts", []), "request_shape")
-        failure_modes = list_count(path_row.get("failure_mode_counts", []), "failure_mode")
+        actor_map = infer_status_dimension(path_row, "actor_signal_counts", "actor_signal")
+        ua_map = infer_status_dimension(path_row, "user_agent_groups", "group")
+        country_map = infer_status_dimension(path_row, "countries", "country")
+        request_shape_map = infer_status_dimension(path_row, "request_shape_counts", "request_shape")
+        failure_mode_map = infer_status_dimension(path_row, "failure_mode_counts", "failure_mode")
         for status_row in path_row.get("statuses", []):
             if not isinstance(status_row, dict):
                 continue
             code = as_int(status_row.get("status"), -1)
             if code not in STATUS_HYPOTHESES:
                 continue
+            status_count = as_int(status_row.get("count"))
+            actor = actor_map.get(code, "unknown_actor")
             rows.append({
-                "count": as_int(status_row.get("count")),
+                "count": status_count,
                 "status_code": code,
                 "path": path,
                 "path_classification": classify_path(path),
                 "cache_status": cache_map.get(code, "unknown"),
                 "cache_status_proof": "AGGREGATE_BALANCE_CORRELATION" if code in cache_map else "UNKNOWN",
-                "user_agent_group": max(ua_counts, key=ua_counts.get) if ua_counts else "unknown",
-                "actor_signal": max(actor_counts, key=actor_counts.get) if actor_counts else "unknown_actor",
-                "actor_signal_counts": actor_counts,
-                "country": max(country_counts, key=country_counts.get) if country_counts else "unknown",
-                "request_shape": max(request_shapes, key=request_shapes.get) if request_shapes else str(path_row.get("request_shape") or "unknown"),
-                "failure_mode": max(failure_modes, key=failure_modes.get) if failure_modes else str(path_row.get("failure_mode") or f"unknown_{code}"),
+                "user_agent_group": ua_map.get(code, "unknown"),
+                "user_agent_group_proof": "AGGREGATE_BALANCE_CORRELATION" if code in ua_map else "UNKNOWN",
+                "actor_signal": actor,
+                "actor_signal_proof": "AGGREGATE_BALANCE_CORRELATION" if code in actor_map else "UNKNOWN",
+                "actor_signal_counts": {actor: status_count} if code in actor_map else {},
+                "country": country_map.get(code, "unknown"),
+                "country_proof": "AGGREGATE_BALANCE_CORRELATION" if code in country_map else "UNKNOWN",
+                "request_shape": request_shape_map.get(code, "unknown"),
+                "request_shape_proof": "AGGREGATE_BALANCE_CORRELATION" if code in request_shape_map else "UNKNOWN",
+                "failure_mode": failure_mode_map.get(code, f"unknown_{code}"),
+                "failure_mode_proof": "AGGREGATE_BALANCE_CORRELATION" if code in failure_mode_map else "UNKNOWN",
                 "first_seen": None,
                 "last_seen": None,
                 "observed_in_snapshot_at": generated_at,
@@ -668,6 +754,298 @@ def direct_evidence(discovery: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def build_safety_block() -> Dict[str, Any]:
+    """Module boundary plus the canonical runtime flags, never a hardcoded runtime state."""
+    runtime = canonical_truth.resolve_runtime_flags()
+    flags = runtime.get("flags", {})
+    provenance = runtime.get("provenance", {})
+    return {
+        **SAFETY_FLAGS,
+        "semantics": SAFETY_FLAGS_SEMANTICS,
+        "module_productive_apply_lock": True,
+        "runtime_emergency_stop": flags.get("emergency_stop"),
+        "runtime_breach": flags.get("breach"),
+        "runtime_autonomy_level": flags.get("autonomy_level"),
+        "runtime_systemd_timer_active": flags.get("systemd_timer_active"),
+        "runtime_low_live_apply_enabled": flags.get("low_live_apply_enabled"),
+        "runtime_flags_status": runtime.get("status"),
+        "runtime_flags_unresolved": runtime.get("unresolved_fields", []),
+        "runtime_emergency_stop_source": provenance.get("emergency_stop", {}).get("source"),
+        "runtime_breach_source": provenance.get("breach", {}).get("source"),
+    }
+
+
+def wp_users_me_row(website: Dict[str, Any]) -> Dict[str, Any]:
+    """The current aggregate row for the WordPress REST identity endpoint."""
+    origin = website.get("origin_pressure_breakdown")
+    rows = origin.get("top_5xx_paths") if isinstance(origin, dict) else None
+    if not isinstance(rows, list):
+        rows = website.get("top_5xx_paths") if isinstance(website.get("top_5xx_paths"), list) else []
+    for row in rows:
+        if isinstance(row, dict) and normalize_evidence_path(row.get("path")) == WP_USERS_ME_PATH:
+            return row
+    return {}
+
+
+def privacy_scan(payload: Any) -> List[str]:
+    """Refuse to carry identity material into the diagnostic output."""
+    findings: List[str] = []
+
+    def walk(node: Any, trail: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lowered = str(key).lower()
+                if any(marker in lowered for marker in WP_USERS_ME_FORBIDDEN_KEYS):
+                    findings.append(f"{trail}.{key}")
+                walk(value, f"{trail}.{key}")
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, f"{trail}[{index}]")
+
+    walk(payload, "wp_users_me_diagnostic")
+    return findings
+
+
+def build_wp_users_me_diagnostic(website: Dict[str, Any]) -> Dict[str, Any]:
+    """Read-only classification of current /wp-json/wp/v2/users/me 5xx pressure.
+
+    Uses only aggregates that the Cloudflare monitor snapshot already collected:
+    request frequency, actor class, user-agent class, country distribution, cache
+    status, response status and — where present — referer class. No cookies, no
+    Authorization headers, no tokens and no user identifiers are read or stored.
+    """
+    row = wp_users_me_row(website)
+    if not row:
+        return {
+            "status": "WP_USERS_ME_EVIDENCE_INSUFFICIENT",
+            "path": WP_USERS_ME_PATH,
+            "classification": "WP_USERS_ME_EVIDENCE_INSUFFICIENT",
+            "classification_reason": (
+                "The current website snapshot contains no 5xx aggregate row for this path."
+            ),
+            "present": False,
+            "evidence": {},
+            "candidate_classifications": [],
+            "privacy": dict(WP_USERS_ME_PRIVACY_GUARANTEES),
+            "missing_evidence": [
+                "current 5xx aggregate row for the path",
+                "per-path temporal distribution",
+            ],
+            "productive_rule_applied": False,
+            "diagnosis_only": True,
+        }
+
+    statuses = {as_int(item.get("status")): as_int(item.get("count"))
+                for item in row.get("statuses", []) if isinstance(item, dict)}
+    total_5xx = sum(statuses.values())
+    count_504 = statuses.get(504, 0)
+    countries = list_count(row.get("countries", []), "country")
+    user_agents = list_count(row.get("user_agent_groups", []), "group")
+    cache_statuses = list_count(row.get("cache_status", []), "cache_status")
+    actor_signals = list_count(row.get("actor_signal_counts", []), "actor_signal")
+    failure_modes = list_count(row.get("failure_mode_counts", []), "failure_mode")
+    request_shapes = list_count(row.get("request_shape_counts", []), "request_shape")
+    referers = list_count(row.get("referers", []), "referer")
+    requests_24h = as_int(row.get("top_paths_24h_request_count"))
+    security_actions = row.get("security_actions_24h")
+    security_action_count = len(security_actions) if isinstance(security_actions, list) else 0
+
+    country_count = len(countries)
+    top_country_share = (
+        round(max(countries.values()) / total_5xx * 100, 2) if countries and total_5xx else None
+    )
+    failure_ratio = round(total_5xx / requests_24h * 100, 2) if requests_24h else None
+    browser_like = any(
+        marker in group.lower()
+        for group in user_agents
+        for marker in ("chrome", "firefox", "safari", "edge", "browser")
+    )
+    infrastructure_like = any(
+        marker in group.lower()
+        for group in user_agents
+        for marker in ("nginx", "early hints", "curl", "python", "go-http", "libwww", "okhttp")
+    )
+    timeout_dominant = (
+        failure_modes.get("cloudflare_to_origin_timeout", 0) >= total_5xx / 2 if total_5xx else False
+    ) or (count_504 >= total_5xx / 2 if total_5xx else False)
+    cache_bypassed = sum(
+        count for label, count in cache_statuses.items() if label in {"miss", "dynamic", "bypass", "expired"}
+    )
+
+    evidence = {
+        "request_frequency": {
+            "total_5xx_24h": total_5xx,
+            "status_504_24h": count_504,
+            "path_requests_24h": requests_24h or None,
+            "failure_share_of_path_requests_percent": failure_ratio,
+        },
+        "response_status": {str(code): count for code, count in sorted(statuses.items())},
+        "cache_status": cache_statuses,
+        "cache_bypassed_count": cache_bypassed,
+        "country_distribution": countries,
+        "distinct_countries": country_count,
+        "top_country_share_percent": top_country_share,
+        "user_agent_class": user_agents,
+        "actor_class": actor_signals or ({row.get("actor_signal"): total_5xx} if row.get("actor_signal") else {}),
+        "failure_mode": failure_modes or ({row.get("failure_mode"): total_5xx} if row.get("failure_mode") else {}),
+        "request_shape": request_shapes,
+        "referer_class": referers or None,
+        "referer_evidence": "COLLECTED" if referers else "EVIDENCE_NOT_COLLECTED",
+        "temporal_clustering": "EVIDENCE_NOT_COLLECTED",
+        "temporal_clustering_reason": (
+            "The Cloudflare snapshot aggregates this path without a per-path time dimension."
+        ),
+        "authenticated_vs_anonymous": "EVIDENCE_NOT_SAFELY_AVAILABLE",
+        "authenticated_evidence_reason": (
+            "Distinguishing authenticated from anonymous calls would require cookie or "
+            "Authorization header inspection, which is forbidden."
+        ),
+        "security_actions_24h_count": security_action_count,
+        "covered_by_sentinel_combined_rule": bool(row.get("covered_by_sentinel_combined_rule")),
+        "hostnames": sorted({str(item) for item in row.get("hostnames", []) if item}),
+    }
+
+    candidates: List[Dict[str, Any]] = []
+
+    def add(name: str, matched: bool, reason: str, confidence: str) -> None:
+        candidates.append({
+            "classification": name,
+            "matched": bool(matched),
+            "reason": reason,
+            "confidence": confidence if matched else "none",
+        })
+
+    add(
+        "WP_USERS_ME_ORIGIN_TIMEOUT",
+        timeout_dominant,
+        (
+            f"{count_504} of {total_5xx} current 5xx are 504 with a "
+            "cloudflare_to_origin_timeout failure mode."
+            if timeout_dominant
+            else "504 / origin-timeout failure mode is not dominant."
+        ),
+        "high" if timeout_dominant and total_5xx >= 10 else "medium",
+    )
+    bot_like = (
+        country_count >= 3
+        and infrastructure_like
+        and not browser_like
+    )
+    add(
+        "WP_USERS_ME_BOT_OR_SCANNER",
+        bot_like,
+        (
+            f"Requests spread over {country_count} countries with a non-browser user-agent class "
+            f"({', '.join(sorted(user_agents)) or 'unknown'}) and no browser class present."
+            if bot_like
+            else "No combination of multi-country spread and non-browser user-agent class."
+        ),
+        "medium",
+    )
+    admin_like = (
+        browser_like
+        and country_count <= 2
+        and (top_country_share or 0) >= 80
+    )
+    add(
+        "WP_USERS_ME_EXPECTED_ADMIN_TRAFFIC",
+        admin_like,
+        (
+            "Browser user-agent class concentrated in a single country, consistent with owner "
+            "or editor admin sessions."
+            if admin_like
+            else "No concentrated single-country browser pattern that would indicate admin usage."
+        ),
+        "medium",
+    )
+    frontend_like = browser_like and bool(referers) and country_count >= 2
+    add(
+        "WP_USERS_ME_FRONTEND_DEPENDENCY",
+        frontend_like,
+        (
+            "Browser user-agent class with collected referer evidence indicates a frontend "
+            "dependency on the identity endpoint."
+            if frontend_like
+            else "No referer evidence combined with a browser class is available."
+        ),
+        "low",
+    )
+    add(
+        "WP_USERS_ME_PLUGIN_POLLING",
+        False,
+        (
+            "Plugin polling requires a per-path temporal distribution, which the current "
+            "snapshot does not collect."
+        ),
+        "none",
+    )
+    insufficient = total_5xx == 0 or (not timeout_dominant and not bot_like and not admin_like and not frontend_like)
+    add(
+        "WP_USERS_ME_EVIDENCE_INSUFFICIENT",
+        insufficient,
+        (
+            "Current aggregates do not support any specific classification."
+            if insufficient
+            else "Sufficient aggregate evidence for at least one specific classification."
+        ),
+        "high" if insufficient else "none",
+    )
+
+    matched = [item for item in candidates if item["matched"]]
+    if matched:
+        order = {name: index for index, name in enumerate(WP_USERS_ME_CLASSIFICATION_PRIORITY)}
+        primary = sorted(matched, key=lambda item: order.get(item["classification"], 99))[0]
+        classification = primary["classification"]
+        classification_reason = primary["reason"]
+        confidence = primary["confidence"]
+    else:
+        classification = "WP_USERS_ME_EVIDENCE_INSUFFICIENT"
+        classification_reason = "No classification rule matched the current aggregates."
+        confidence = "low"
+
+    secondary = [
+        item["classification"] for item in matched if item["classification"] != classification
+    ]
+    diagnostic = {
+        "status": classification,
+        "path": WP_USERS_ME_PATH,
+        "present": True,
+        "classification": classification,
+        "classification_reason": classification_reason,
+        "confidence": confidence,
+        "secondary_classifications": secondary,
+        "candidate_classifications": candidates,
+        "allowed_classifications": list(WP_USERS_ME_CLASSIFICATIONS),
+        "evidence": evidence,
+        "missing_evidence": [
+            "per-path temporal distribution for polling detection",
+            "authenticated vs anonymous split (forbidden to collect)",
+        ] + ([] if referers else ["referer class"]),
+        "causality_proven": False,
+        "evidence_level": "B_STRONG_CORRELATION" if total_5xx >= 10 else "C_WEAK_CORRELATION",
+        "owner_note": (
+            "Diagnosis only. No WAF rule, no rate limit, no Cloudflare change and no WordPress "
+            "change is derived from this classification."
+        ),
+        "productive_rule_applied": False,
+        "new_waf_rule_recommended": False,
+        "diagnosis_only": True,
+        "privacy": dict(WP_USERS_ME_PRIVACY_GUARANTEES),
+    }
+    # Scan the collected evidence, not the privacy declaration itself: the
+    # guarantee keys legitimately name the forbidden material they exclude.
+    privacy_findings = privacy_scan({
+        "evidence": diagnostic["evidence"],
+        "candidate_classifications": diagnostic["candidate_classifications"],
+        "secondary_classifications": diagnostic["secondary_classifications"],
+    })
+    diagnostic["privacy"]["forbidden_field_findings"] = privacy_findings
+    diagnostic["privacy"]["privacy_status"] = (
+        "WP_USERS_ME_PRIVACY_OK" if not privacy_findings else "WP_USERS_ME_PRIVACY_VIOLATION"
+    )
+    return diagnostic
+
+
 def build_hypotheses(code: int, current_count: int, path_rows: Sequence[Dict[str, Any]], evidence: Dict[str, Any]) -> List[Dict[str, Any]]:
     relevant = [row for row in path_rows if row["status_code"] == code]
     dynamic_count = sum(row["count"] for row in relevant if row["cache_status"] in {"dynamic", "miss"})
@@ -784,6 +1162,338 @@ def iso_utc(value: datetime) -> str:
     return value.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def evaluate_evidence_freshness(
+    generated_at: Any, now: Optional[datetime] = None
+) -> Dict[str, Any]:
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    generated = parse_timestamp(generated_at)
+    if generated is None:
+        return {
+            "generated_at": generated_at,
+            "age_seconds": None,
+            "freshness_status": "INVALID_TIMESTAMP",
+            "included_in_master_status": False,
+            "correlation_allowed": True,
+            "reason": "Source generation time is missing or invalid; evidence is private context only.",
+        }
+    age_seconds = (current_time - generated).total_seconds()
+    if age_seconds < -300:
+        return {
+            "generated_at": iso_utc(generated),
+            "age_seconds": round(age_seconds, 2),
+            "freshness_status": "INVALID_TIMESTAMP",
+            "included_in_master_status": False,
+            "correlation_allowed": False,
+            "reason": "Source timestamp is unexpectedly in the future.",
+        }
+    age_seconds = max(0.0, age_seconds)
+    if age_seconds <= FRESHNESS_THRESHOLDS_SECONDS["current"]:
+        status = "CURRENT"
+        included = True
+        reason = "Evidence is within the current 24-hour window."
+    elif age_seconds <= FRESHNESS_THRESHOLDS_SECONDS["stale_informational"]:
+        status = "STALE_INFORMATIONAL"
+        included = False
+        reason = "Evidence is older than 24 hours and remains informational only."
+    else:
+        status = "STALE_EXCLUDED_FROM_MASTER_STATUS"
+        included = False
+        reason = "Evidence is older than seven days and is excluded from current status decisions."
+    return {
+        "generated_at": iso_utc(generated),
+        "age_seconds": round(age_seconds, 2),
+        "freshness_status": status,
+        "included_in_master_status": included,
+        "correlation_allowed": True,
+        "reason": reason,
+    }
+
+
+def normalize_ionos_rows(data: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    source_rows: Any = data.get("key_rows")
+    if not isinstance(source_rows, list):
+        source_rows = data.get("rows")
+    if not isinstance(source_rows, list):
+        source_rows = data.get("top_error_paths")
+    if not isinstance(source_rows, list):
+        return [], ["ionos_rows_missing"]
+    rows: List[Dict[str, Any]] = []
+    findings: List[str] = []
+    for index, row in enumerate(source_rows):
+        if not isinstance(row, dict):
+            findings.append(f"ionos_row_{index}_not_object")
+            continue
+        path = row.get("path")
+        status_value = row.get("status", row.get("status_code", row.get("http_status")))
+        count_value = row.get("count", row.get("requests", row.get("anzahl")))
+        status = as_int(status_value, -1)
+        count = as_int(count_value, -1)
+        if not isinstance(path, str) or not path.strip() or not 100 <= status <= 599 or count < 0:
+            findings.append(f"ionos_row_{index}_invalid")
+            continue
+        rows.append({
+            "row_id": f"ionos-{index + 1}",
+            "path": normalize_evidence_path(path),
+            "status": status,
+            "count": count,
+            "source_category": str(row.get("source_category") or row.get("category") or "unknown"),
+            "source_priority": str(row.get("source_priority") or row.get("priority") or "UNKNOWN"),
+        })
+    return sorted(rows, key=lambda item: (-item["count"], item["status"], item["path"])), findings
+
+
+def classify_ionos_response(row: Dict[str, Any]) -> Dict[str, Any]:
+    path = normalize_evidence_path(row.get("path"))
+    status = as_int(row.get("status"), -1)
+    source_category = str(row.get("source_category") or "unknown")
+    scanner_path = is_scanner_probe_path(path)
+    path_class = classify_path(path)
+    operational_class = "CONTEXT_REQUIRED"
+    disposition = "OWNER_CONTEXT_REVIEW"
+    priority = "P3_CONTEXT"
+    recommendation = "Correlate method, actor, referrer, host, and timestamp before changing the site."
+    required_evidence = ["request_method", "actor_or_user_agent_group", "timestamp_bucket"]
+    expected_response_candidate = False
+    counts_as_origin_availability_signal = False
+
+    if status in STATUS_HYPOTHESES or 500 <= status <= 599:
+        counts_as_origin_availability_signal = True
+        priority = "P1_ORIGIN_STABILITY"
+        disposition = "DIAGNOSE_ORIGIN_BEFORE_CHANGE"
+        required_evidence = ["matching_origin_log", "timestamp_bucket", "actor_or_user_agent_group"]
+        if scanner_path:
+            operational_class = "SCANNER_CORRELATED_ORIGIN_FAILURE"
+            recommendation = (
+                "Treat the scanner request as actor context, but diagnose why the origin returned 5xx. "
+                "Do not dismiss the 5xx as harmless scanner noise."
+            )
+        else:
+            operational_class = "ORIGIN_AVAILABILITY_SIGNAL"
+            recommendation = "Correlate current hosting, PHP, WordPress, and upstream logs before optimization work."
+    elif path == "/wp-json/wp/v2/users/me" and status == 401:
+        operational_class = "EXPECTED_UNAUTHENTICATED_RESPONSE_CANDIDATE"
+        disposition = "NO_REPAIR_WITHOUT_AUTHENTICATED_FAILURE"
+        priority = "P4_EXPECTED_RESPONSE"
+        recommendation = "Do not repair unless an authenticated WordPress workflow is confirmed to fail."
+        required_evidence = ["authenticated_workflow_result", "request_auth_context"]
+        expected_response_candidate = True
+    elif path == "/wp-comments-post.php" and status == 405:
+        operational_class = "EXPECTED_METHOD_RESTRICTION_CANDIDATE"
+        disposition = "NO_REPAIR_WITHOUT_VALID_POST_FAILURE"
+        priority = "P4_EXPECTED_RESPONSE"
+        recommendation = "Do not repair unless a valid comment POST workflow is confirmed to fail."
+        required_evidence = ["request_method", "valid_comment_workflow_result"]
+        expected_response_candidate = True
+    elif path == "/hello-world" and status == 410:
+        operational_class = "INTENTIONAL_REMOVAL_CANDIDATE"
+        disposition = "CHECK_CURRENT_INTERNAL_REFERENCES_ONLY"
+        priority = "P4_HISTORICAL_CONTENT"
+        recommendation = "Keep 410 unless current menus, sitemap entries, or internal links still reference the path."
+        required_evidence = ["current_internal_link_evidence", "current_sitemap_evidence"]
+        expected_response_candidate = True
+    elif source_category == "stale_plugin_admin_request" and status == 404:
+        operational_class = "STALE_ADMIN_CLIENT_REQUEST"
+        disposition = "CLOSE_STALE_ADMIN_CONTEXT"
+        priority = "P4_HISTORICAL_ADMIN"
+        recommendation = "Close stale admin tabs; do not create a public redirect or restore an unused plugin endpoint."
+        required_evidence = ["current_admin_workflow_result"]
+        expected_response_candidate = True
+    elif scanner_path and status in {400, 401, 403, 404, 405, 410}:
+        operational_class = "EXPECTED_SCANNER_REJECTION"
+        disposition = "MONITOR_NO_REPAIR"
+        priority = "P5_SCANNER_NOISE"
+        recommendation = "Preserve the negative response; do not create the requested file or redirect."
+        required_evidence = []
+        expected_response_candidate = True
+    elif path == "/wp-admin/admin-ajax.php" and status == 403:
+        operational_class = "ADMIN_AJAX_SECURITY_OR_WORKFLOW_CONTEXT_REQUIRED"
+        disposition = "REVIEW_FRONTEND_WORKFLOW_BEFORE_CHANGE"
+        priority = "P3_CONTEXT"
+        recommendation = "Separate direct probes from legitimate nonce-protected frontend AJAX requests before changing security rules."
+        required_evidence = ["request_method", "referrer_class", "nonce_or_auth_context", "frontend_workflow_result"]
+    elif path == "/" and status == 404:
+        operational_class = "ROOT_ROUTING_CONTEXT_REQUIRED"
+        disposition = "REVIEW_REQUEST_SHAPE_BEFORE_REDIRECT"
+        priority = "P2_ROUTE_INTEGRITY"
+        recommendation = "Separate canonical browser GET requests from host, method, query, and scanner variants before considering a redirect."
+        required_evidence = ["request_method", "request_host", "query_class", "actor_or_user_agent_group"]
+    elif status == 429:
+        operational_class = "RATE_LIMIT_ISSUER_REVIEW"
+        disposition = "VERIFY_PROTECTION_VS_USER_IMPACT"
+        priority = "P2_RATE_LIMIT_CONTEXT"
+        recommendation = "Identify whether Cloudflare, hosting, WordPress, or an application component generated 429 and which actor was limited."
+        required_evidence = ["response_issuer", "actor_or_user_agent_group", "browser_workflow_result"]
+    elif status == 404:
+        operational_class = "CURRENT_LINK_EVIDENCE_REQUIRED"
+        disposition = "CHECK_REFERENCES_BEFORE_REDIRECT"
+        priority = "P3_CONTENT_CONTEXT"
+        recommendation = "Review only when current browser, sitemap, referrer, or internal-link evidence shows the path is relevant."
+        required_evidence = ["current_internal_link_evidence", "referrer_class"]
+
+    return {
+        **row,
+        "path": path,
+        "path_classification": path_class,
+        "scanner_path": scanner_path,
+        "operational_class": operational_class,
+        "action_disposition": disposition,
+        "operational_priority": priority,
+        "recommendation": recommendation,
+        "required_evidence": required_evidence,
+        "expected_response_candidate": expected_response_candidate,
+        "counts_as_origin_availability_signal": counts_as_origin_availability_signal,
+        "verified_user_impact": "unknown",
+        "causality_proven": False,
+        "automatic_action": "NO_ACTION",
+        "new_waf_rule_recommended": False,
+    }
+
+
+def detect_synchronized_sequences(
+    ionos_rows: Sequence[Dict[str, Any]], current_path_rows: Sequence[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    groups: Dict[Tuple[int, int], List[Dict[str, Any]]] = {}
+    for row in ionos_rows:
+        groups.setdefault((as_int(row.get("status")), as_int(row.get("count"))), []).append(row)
+    current_index = {
+        (as_int(row.get("status_code")), normalize_evidence_path(row.get("path"))): row
+        for row in current_path_rows
+    }
+    sequences: List[Dict[str, Any]] = []
+    for (status, count), grouped in sorted(groups.items()):
+        paths = sorted({normalize_evidence_path(row.get("path")) for row in grouped})
+        if len(paths) < IONOS_SEQUENCE_MIN_PATHS:
+            continue
+        matches = [current_index[(status, path)] for path in paths if (status, path) in current_index]
+        current_counts = [as_int(row.get("count")) for row in matches]
+        actor_signals = sorted({
+            str(row.get("actor_signal")) for row in matches
+            if row.get("actor_signal") not in {None, "", "unknown_actor"}
+        })
+        all_scanner_paths = all(is_scanner_probe_path(path) for path in paths)
+        if all_scanner_paths:
+            sequence_kind = "SCANNER_PROBE_SEQUENCE"
+        elif status >= 500:
+            sequence_kind = "ORIGIN_FAILURE_MULTI_PATH_SEQUENCE"
+        else:
+            sequence_kind = "SYNCHRONIZED_MULTI_PATH_SEQUENCE"
+        replicated = len(matches) == len(paths) and len(set(current_counts)) == 1
+        correlation = "STRONG" if replicated and len(actor_signals) == 1 else "MODERATE" if matches else "WEAK"
+        sequences.append({
+            "sequence_id": f"status-{status}-count-{count}-paths-{len(paths)}",
+            "sequence_kind": sequence_kind,
+            "status": status,
+            "source_count_per_path": count,
+            "paths": paths,
+            "path_count": len(paths),
+            "raw_request_observations": count * len(paths),
+            "sequence_occurrence_candidate": count,
+            "operational_incident_groups": 1,
+            "request_duplication_proven": False,
+            "repeated_sequence_supported": replicated,
+            "cross_source_match_count": len(matches),
+            "cross_source_counts": current_counts,
+            "cross_source_actor_signal": actor_signals[0] if len(actor_signals) == 1 else "unknown_actor",
+            "correlation_strength": correlation,
+            "causality_proven": False,
+            "verified_user_impact": "unknown",
+            "automatic_block": False,
+            "new_waf_rule_recommended": False,
+            "recommendation": (
+                "Correlate timestamps and scanner schedule as one sequence while retaining every raw request count. "
+                "Do not infer causality or create an actor-wide block."
+            ),
+        })
+    return sorted(sequences, key=lambda item: (-item["raw_request_observations"], item["sequence_id"]))
+
+
+def build_ionos_evidence_analysis(
+    current_path_rows: Sequence[Dict[str, Any]], now: Optional[datetime] = None
+) -> Dict[str, Any]:
+    source, read_status = read_json(IONOS_EVIDENCE_JSON)
+    if read_status != "ok" or not isinstance(source, dict):
+        return {
+            "status": "IONOS_EVIDENCE_MISSING" if read_status == "missing" else "IONOS_EVIDENCE_INVALID",
+            "source_path": rel(IONOS_EVIDENCE_JSON),
+            "imported_rows": 0,
+            "freshness": evaluate_evidence_freshness(None, now),
+            "row_classifications": [],
+            "synchronized_sequences": [],
+            "summary": {},
+            "improvement_candidates": [],
+            "missing_evidence": ["Structured private IONOS Webspace evidence is not available."],
+            "validation_findings": [] if read_status == "missing" else [f"ionos_source_{read_status}"],
+            "automatic_apply": False,
+        }
+    rows, findings = normalize_ionos_rows(source)
+    classified = [classify_ionos_response(row) for row in rows]
+    sequences = detect_synchronized_sequences(classified, current_path_rows)
+    freshness = evaluate_evidence_freshness(source.get("source_generated_at"), now)
+    class_counts: Dict[str, int] = {}
+    disposition_counts: Dict[str, int] = {}
+    for row in classified:
+        class_counts[row["operational_class"]] = class_counts.get(row["operational_class"], 0) + 1
+        disposition_counts[row["action_disposition"]] = disposition_counts.get(row["action_disposition"], 0) + 1
+    missing_evidence = [str(item) for item in source.get("owner_evidence_needed", []) if item]
+    if freshness["freshness_status"] == "INVALID_TIMESTAMP":
+        missing_evidence.insert(0, "Source report generation timestamp and exact log window.")
+    improvements = [
+        {
+            "candidate": "CORRELATE_ORIGIN_LOG_WINDOW",
+            "status": "OWNER_EVIDENCE_REQUIRED",
+            "reason": "Match 503/504 timestamps with hosting, PHP, WordPress, and upstream logs.",
+        },
+        {
+            "candidate": "REVIEW_SYNCHRONIZED_SCANNER_SEQUENCE",
+            "status": "REVIEW_ONLY",
+            "reason": "Review scanner schedule or concurrency only if timestamp-level sequence correlation is confirmed.",
+        },
+        {
+            "candidate": "VERIFY_STATIC_ASSET_ORIGIN_PATH",
+            "status": "OWNER_REVIEW_REQUIRED",
+            "reason": "A static admin asset returning 503 warrants routing and origin-load review without changing WordPress automatically.",
+        },
+        {
+            "candidate": "ANONYMOUS_MICROCACHE_CANARY",
+            "status": "BLOCKED_PENDING_SEPARATE_GUARDED_ADAPTER_VALIDATION",
+            "reason": "Caching remains a later reversible candidate, not an action from this diagnostic component.",
+        },
+        {
+            "candidate": "EXACT_SCANNER_PATH_CHALLENGE",
+            "status": "BLOCKED_PENDING_FRESH_TRIGGER_AND_WRITE_CANARY",
+            "reason": "Only exact high-confidence scanner paths may be considered; root, pagination, admin assets, actors, countries, and browsers are excluded.",
+        },
+    ]
+    return {
+        "status": "IONOS_EVIDENCE_IMPORTED" if classified and not findings else "IONOS_EVIDENCE_IMPORTED_WITH_FINDINGS",
+        "source_path": rel(IONOS_EVIDENCE_JSON),
+        "source_type": source.get("source_type"),
+        "source_window": source.get("source_window"),
+        "imported_rows": len(classified),
+        "freshness": freshness,
+        "included_in_master_status": freshness["included_in_master_status"],
+        "available_for_private_correlation": freshness["correlation_allowed"],
+        "row_classifications": classified,
+        "synchronized_sequences": sequences,
+        "summary": {
+            "operational_class_counts": class_counts,
+            "action_disposition_counts": disposition_counts,
+            "origin_availability_rows": sum(1 for row in classified if row["counts_as_origin_availability_signal"]),
+            "expected_response_candidates": sum(1 for row in classified if row["expected_response_candidate"]),
+            "context_review_rows": sum(1 for row in classified if row["operational_priority"].startswith(("P2", "P3"))),
+            "raw_request_observations": sum(as_int(row.get("count")) for row in classified),
+            "operational_sequence_groups": len(sequences),
+        },
+        "improvement_candidates": improvements,
+        "missing_evidence": list(dict.fromkeys(missing_evidence)),
+        "validation_findings": findings,
+        "causality_proven": False,
+        "verified_user_impact": "unknown",
+        "automatic_apply": False,
+        "new_waf_rule_recommended": False,
+    }
+
+
 def build_timeline(previous: Dict[str, Any], current: Dict[str, Any], website: Dict[str, Any]) -> Dict[str, Any]:
     rolling = website.get("rolling_window_context", {}) if isinstance(website.get("rolling_window_context"), dict) else {}
     history = rolling.get("history", {}) if isinstance(rolling.get("history"), dict) else {}
@@ -863,33 +1573,58 @@ def build_timeline(previous: Dict[str, Any], current: Dict[str, Any], website: D
     }
 
 
-def choose_priorities(deltas: Dict[int, Dict[str, Any]], tls: Dict[str, Any]) -> Dict[str, Any]:
+def choose_priorities(
+    deltas: Dict[int, Dict[str, Any]], tls: Dict[str, Any], ionos: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    ionos = ionos or {}
+    synchronized_sequences = ionos.get("synchronized_sequences", [])
     if SAFETY_FLAGS["breach"]:
         detail = "SAFETY_ESCALATION"
     elif deltas[503]["trend"] == "SIGNIFICANT_GROWTH":
         detail = "ORIGIN_503_GROWTH_DIAGNOSIS"
+    elif deltas[504]["trend"] == "SIGNIFICANT_GROWTH":
+        detail = "ORIGIN_504_GROWTH_DIAGNOSIS"
     elif tls["status"] in {"TLS_REVIEW_REQUIRED", "TLS_SIGNIFICANT_GROWTH"}:
         detail = "ORIGIN_TLS_EVIDENCE_REVIEW"
+    elif deltas[503]["current_count"] and synchronized_sequences:
+        detail = "ORIGIN_503_SEQUENCE_DIAGNOSIS"
     elif deltas[504]["current_count"]:
         detail = "ORIGIN_504_ROLLING_WINDOW_DIAGNOSIS"
     else:
         detail = "ORIGIN_EVIDENCE_CORRELATION"
+    ordered_actions = []
+    if detail == "ORIGIN_503_GROWTH_DIAGNOSIS":
+        ordered_actions.append("Diagnose current status-503 growth by path, time, actor, cache status, and origin evidence.")
+    elif detail == "ORIGIN_504_GROWTH_DIAGNOSIS":
+        ordered_actions.append("Diagnose current status-504 growth and correlate root timeouts with origin and upstream evidence.")
+    elif detail == "ORIGIN_503_SEQUENCE_DIAGNOSIS":
+        ordered_actions.append("Correlate the synchronized status-503 path sequence by timestamp before treating paths as independent incidents.")
+    else:
+        ordered_actions.append("Continue current origin-failure diagnosis using fresh status-specific evidence.")
+    if synchronized_sequences:
+        ordered_actions.append(
+            "Review synchronized IONOS path sequences as one operational pattern while retaining all raw request counts."
+        )
+    ordered_actions.extend([
+        "Review the static admin asset 503 path for routing or origin-load evidence without changing WordPress automatically.",
+        "Separate root 404 and 429 rows by host, method, actor, response issuer, query class, and timestamp.",
+        "Treat REST 401, comments 405, intentional 410, and scanner 404 as expected-response candidates until workflow evidence proves otherwise.",
+        "Review available origin, PHP, WordPress, and hosting evidence; request missing evidence explicitly.",
+        "Keep SEO and metadata work below technical stability work.",
+    ])
     return {
         "selected_priority": "WEBSITE_ORIGIN_STABILITY",
         "selected_detail_priority": detail,
-        "ordered_actions": [
-            "Diagnose status-503 behavior by current path, time, actor, cache status, and local origin evidence.",
-            "Review the isolated status-526 TLS evidence manually without changing SSL settings.",
-            "Continue status-504 rolling-window observation and require a confirming snapshot.",
-            "Correlate top paths without deriving a broad block rule.",
-            "Review available origin, PHP, WordPress, and hosting evidence; request missing evidence explicitly.",
-            "Keep SEO and metadata work below technical stability work.",
-        ],
+        "ordered_actions": ordered_actions,
+        "ionos_sequence_groups": len(synchronized_sequences),
         "suppressed_lower_priorities": [
             "SEO_TITLE_REVIEW",
             "META_DESCRIPTION_REVIEW",
             "OPEN_GRAPH_REVIEW",
             "INTERNAL_LINK_REVIEW",
+            "REST_401_REPAIR_WITHOUT_AUTH_FAILURE",
+            "SCANNER_404_REDIRECT_CREATION",
+            "SITELOCK_GLOBAL_BLOCK",
             "NEW_WAF_RULE",
             "TIMER_INSTALLATION",
             "LOW_RISK_AUTONOMY_ACTIVATION",
@@ -985,11 +1720,16 @@ def build_report() -> Dict[str, Any]:
         {code: current["status_code_counts"][str(code)] for code in STATUS_HYPOTHESES},
     )
     actors = correlate_actors(website, paths)
+    ionos = build_ionos_evidence_analysis(paths)
     evidence = direct_evidence(discovery)
     evidence["level_b_strong_correlation"] = [
         "Current status/path/cache/actor aggregation with per-status detail coverage.",
         "Independent Phase 10.16 consistency snapshot used only as the previous comparison point.",
     ] if website and master else []
+    if any(item.get("correlation_strength") == "STRONG" for item in ionos.get("synchronized_sequences", [])):
+        evidence["level_b_strong_correlation"].append(
+            "A synchronized private IONOS path pattern is replicated in current status/path/actor aggregation."
+        )
     ionos_review = "reports/latest/sentinel-ionos-login-probe-owner-review.md"
     evidence["level_c_weak_correlation"] = [
         "Path volume and grouped user-agent overlap do not prove origin cause.",
@@ -1000,13 +1740,17 @@ def build_report() -> Dict[str, Any]:
             else "Private hosting analytics login-probe evidence was not available in the allowlisted inputs."
         ),
     ]
+    if ionos.get("freshness", {}).get("freshness_status") != "CURRENT":
+        evidence["level_c_weak_correlation"].append(
+            "The private IONOS Webspace excerpt lacks current timestamp evidence and cannot alter current master status."
+        )
     hypotheses = {
         code: build_hypotheses(code, current["status_code_counts"][str(code)], paths, evidence)
         for code in STATUS_HYPOTHESES
     }
     tls = tls_diagnostic(deltas[526], paths)
     timeline = build_timeline(previous, current, website)
-    priority = choose_priorities(deltas, tls)
+    priority = choose_priorities(deltas, tls, ionos)
     missing_inputs = list(discovery["missing_inputs"])
     if not website:
         missing_inputs.append(rel(WEBSITE_JSON))
@@ -1016,7 +1760,8 @@ def build_report() -> Dict[str, Any]:
     significant_growth = any(item["trend"] == "SIGNIFICANT_GROWTH" for item in deltas.values())
     all_current_inputs = bool(website and master and not missing_inputs)
     direct_missing = bool(evidence["missing_evidence"])
-    if SAFETY_FLAGS["breach"]:
+    safety = build_safety_block()
+    if safety.get("runtime_breach") is True:
         diagnostic_status = "ORIGIN_DIAG_RED"
     elif all_current_inputs and not significant_growth and current["total_5xx"] == 0 and tls["count"] == 0 and not direct_missing:
         diagnostic_status = "ORIGIN_DIAG_GREEN"
@@ -1028,7 +1773,7 @@ def build_report() -> Dict[str, Any]:
         "generated_at_utc": generated,
         "status": diagnostic_status,
         "report_classification": REPORT_CLASSIFICATION,
-        "safety": SAFETY_FLAGS,
+        "safety": safety,
         "execution_boundaries": EXECUTION_BOUNDARIES,
         "input_discovery": discovery,
         "missing_inputs": sorted(set(missing_inputs)),
@@ -1053,8 +1798,11 @@ def build_report() -> Dict[str, Any]:
             for code in STATUS_HYPOTHESES
         },
         "path_correlation": paths,
+        "wp_users_me_diagnostic": build_wp_users_me_diagnostic(website),
         "actor_correlation": actors,
         "cache_correlation": {str(code): value for code, value in cache.items()},
+        "ionos_webspace_evidence": ionos,
+        "safe_improvement_plan": ionos.get("improvement_candidates", []),
         "timeline": timeline,
         "evidence_hierarchy": evidence,
         "origin_tls_diagnostic": tls,
@@ -1092,6 +1840,7 @@ def private_header(title: str) -> List[str]:
 
 def render_main(report: Dict[str, Any]) -> str:
     current = report["comparison_scope"]["current_snapshot"]
+    ionos = report.get("ionos_webspace_evidence", {})
     lines = private_header("Sentinel Origin Failure Diagnostics")
     lines += [
         f"- Diagnostic status: `{report['status']}`",
@@ -1103,6 +1852,9 @@ def render_main(report: Dict[str, Any]) -> str:
         f"- Verified user impact: `{report['verified_user_impact']}`",
         f"- New WAF rule recommended: `{str(report['waf_decision']['new_waf_rule_recommended']).lower()}`",
         f"- SSL downgrade recommended: `{str(report['ssl_tls_decision']['ssl_downgrade_recommended']).lower()}`",
+        f"- IONOS evidence import: `{ionos.get('status', 'IONOS_EVIDENCE_MISSING')}`",
+        f"- IONOS freshness: `{ionos.get('freshness', {}).get('freshness_status', 'MISSING')}`",
+        f"- Synchronized path sequences: `{len(ionos.get('synchronized_sequences', []))}`",
         "",
         "## Status Deltas",
         "",
@@ -1169,6 +1921,90 @@ def render_status(report: Dict[str, Any], code: int) -> str:
     return "\n".join(lines)
 
 
+def render_wp_users_me(report: Dict[str, Any]) -> str:
+    diagnostic = report.get("wp_users_me_diagnostic", {})
+    lines = private_header("Sentinel WordPress REST Identity Endpoint Classification")
+    lines += [
+        f"- path: `{diagnostic.get('path')}`",
+        f"- classification: `{diagnostic.get('classification')}`",
+        f"- confidence: `{diagnostic.get('confidence', 'none')}`",
+        f"- evidence level: `{diagnostic.get('evidence_level', 'C_WEAK_CORRELATION')}`",
+        f"- causality proven: `{str(diagnostic.get('causality_proven', False)).lower()}`",
+        f"- diagnosis only: `{str(diagnostic.get('diagnosis_only', True)).lower()}`",
+        f"- productive rule applied: `{str(diagnostic.get('productive_rule_applied', False)).lower()}`",
+        "",
+        diagnostic.get("classification_reason", ""),
+        "",
+    ]
+    if not diagnostic.get("present"):
+        lines += [
+            "## Evidence",
+            "",
+            "- No current 5xx aggregate row exists for this path.",
+        ]
+        return "\n".join(lines)
+
+    evidence = diagnostic.get("evidence", {})
+    frequency = evidence.get("request_frequency", {})
+    lines += [
+        "## Request Frequency",
+        "",
+        f"- current 24h 5xx: `{frequency.get('total_5xx_24h')}`",
+        f"- current 24h 504: `{frequency.get('status_504_24h')}`",
+        f"- 24h path requests: `{frequency.get('path_requests_24h')}`",
+        f"- failure share of path requests: `{frequency.get('failure_share_of_path_requests_percent')}%`",
+        "",
+        "## Dimensions",
+        "",
+        "| Dimension | Value |",
+        "|---|---|",
+        f"| response status | `{evidence.get('response_status')}` |",
+        f"| cache status | `{evidence.get('cache_status')}` |",
+        f"| cache bypassed | `{evidence.get('cache_bypassed_count')}` |",
+        f"| country distribution | `{evidence.get('country_distribution')}` |",
+        f"| distinct countries | `{evidence.get('distinct_countries')}` |",
+        f"| top country share | `{evidence.get('top_country_share_percent')}%` |",
+        f"| user agent class | `{evidence.get('user_agent_class')}` |",
+        f"| actor class | `{evidence.get('actor_class')}` |",
+        f"| failure mode | `{evidence.get('failure_mode')}` |",
+        f"| request shape | `{evidence.get('request_shape')}` |",
+        f"| referer class | `{evidence.get('referer_evidence')}` |",
+        f"| temporal clustering | `{evidence.get('temporal_clustering')}` |",
+        f"| authenticated vs anonymous | `{evidence.get('authenticated_vs_anonymous')}` |",
+        f"| security actions 24h | `{evidence.get('security_actions_24h_count')}` |",
+        f"| covered by combined rule | `{str(evidence.get('covered_by_sentinel_combined_rule')).lower()}` |",
+        "",
+        "## Candidate Classifications",
+        "",
+        "| Classification | Matched | Confidence | Reason |",
+        "|---|---|---|---|",
+    ]
+    for item in diagnostic.get("candidate_classifications", []):
+        lines.append(
+            f"| `{item['classification']}` | `{str(item['matched']).lower()}` | "
+            f"`{item['confidence']}` | {item['reason']} |"
+        )
+    lines += ["", "## Missing Evidence", ""]
+    for item in diagnostic.get("missing_evidence", []):
+        lines.append(f"- {item}")
+    privacy = diagnostic.get("privacy", {})
+    lines += [
+        "",
+        "## Privacy Guarantees",
+        "",
+        f"- privacy status: `{privacy.get('privacy_status', 'WP_USERS_ME_PRIVACY_OK')}`",
+        f"- cookies stored: `{str(privacy.get('cookies_stored', False)).lower()}`",
+        f"- authorization headers stored: `{str(privacy.get('authorization_headers_stored', False)).lower()}`",
+        f"- tokens stored: `{str(privacy.get('tokens_stored', False)).lower()}`",
+        f"- user ids collected: `{str(privacy.get('user_ids_collected', False)).lower()}`",
+        "",
+        "## Owner Note",
+        "",
+        f"- {diagnostic.get('owner_note', 'Diagnosis only.')}",
+    ]
+    return "\n".join(lines)
+
+
 def render_paths(report: Dict[str, Any]) -> str:
     lines = private_header("Sentinel Origin Path Correlation")
     lines += [
@@ -1230,6 +2066,7 @@ def render_timeline(report: Dict[str, Any]) -> str:
 
 def render_owner_plan(report: Dict[str, Any]) -> str:
     priority = report["owner_priority"]
+    ionos = report.get("ionos_webspace_evidence", {})
     lines = private_header("Sentinel Origin Owner Action Plan")
     lines += [
         f"- Selected priority: `{priority['selected_priority']}`",
@@ -1252,6 +2089,18 @@ def render_owner_plan(report: Dict[str, Any]) -> str:
         "",
     ]
     lines.extend(f"- `{item}`" for item in priority["suppressed_lower_priorities"])
+    lines += [
+        "",
+        "## IONOS Evidence Semantics",
+        "",
+        f"- Import status: `{ionos.get('status', 'IONOS_EVIDENCE_MISSING')}`",
+        f"- Freshness: `{ionos.get('freshness', {}).get('freshness_status', 'MISSING')}`",
+        f"- Synchronized sequence groups: `{len(ionos.get('synchronized_sequences', []))}`",
+        f"- Expected-response candidates: `{ionos.get('summary', {}).get('expected_response_candidates', 0)}`",
+        "- Preserve raw counts, but issue one operational recommendation per synchronized sequence.",
+        "- Do not treat REST 401, method-restricted 405, intentional 410, or scanner 404 as repair tasks without confirming workflow evidence.",
+        "- Do not dismiss scanner-correlated 503 as harmless; diagnose the origin response separately.",
+    ]
     return "\n".join(lines)
 
 
@@ -1273,6 +2122,66 @@ def render_evidence_gap(report: Dict[str, Any]) -> str:
     lines += ["", "## Missing Evidence", ""]
     lines.extend(f"- {item}" for item in evidence["missing_evidence"])
     lines += ["", "Missing evidence must be reviewed manually. Sentinel does not request or store credentials."]
+    return "\n".join(lines)
+
+
+def render_ionos_analysis(report: Dict[str, Any]) -> str:
+    ionos = report.get("ionos_webspace_evidence", {})
+    freshness = ionos.get("freshness", {})
+    summary = ionos.get("summary", {})
+    lines = private_header("Sentinel IONOS Webspace Action Classification")
+    lines += [
+        f"- Import status: `{ionos.get('status', 'IONOS_EVIDENCE_MISSING')}`",
+        f"- Imported rows: `{ionos.get('imported_rows', 0)}`",
+        f"- Freshness: `{freshness.get('freshness_status', 'MISSING')}`",
+        f"- Included in current master status: `{str(ionos.get('included_in_master_status', False)).lower()}`",
+        f"- Origin availability rows: `{summary.get('origin_availability_rows', 0)}`",
+        f"- Expected-response candidates: `{summary.get('expected_response_candidates', 0)}`",
+        f"- Context-review rows: `{summary.get('context_review_rows', 0)}`",
+        f"- Operational sequence groups: `{summary.get('operational_sequence_groups', 0)}`",
+        f"- Raw request observations retained: `{summary.get('raw_request_observations', 0)}`",
+        "",
+        "Freshness affects current status inclusion. Missing timestamps do not erase private correlation evidence, but they prevent the excerpt from overriding current telemetry.",
+        "",
+        "## Synchronized Sequences",
+        "",
+        "| Status | Count/path | Paths | Raw observations | Incident groups | Current actor | Correlation | Causality |",
+        "|---:|---:|---:|---:|---:|---|---|---|",
+    ]
+    sequences = ionos.get("synchronized_sequences", [])
+    if sequences:
+        for item in sequences:
+            lines.append(
+                f"| {item['status']} | {item['source_count_per_path']} | {item['path_count']} | "
+                f"{item['raw_request_observations']} | {item['operational_incident_groups']} | "
+                f"`{item['cross_source_actor_signal']}` | `{item['correlation_strength']}` | `false` |"
+            )
+    else:
+        lines.append("| - | - | - | - | - | - | `NONE` | `false` |")
+    lines += [
+        "",
+        "## Response Semantics",
+        "",
+        "| Count | Status | Path | Operational class | Disposition |",
+        "|---:|---:|---|---|---|",
+    ]
+    for row in ionos.get("row_classifications", []):
+        lines.append(
+            f"| {row['count']} | {row['status']} | `{row['path']}` | "
+            f"`{row['operational_class']}` | `{row['action_disposition']}` |"
+        )
+    lines += ["", "## Safe Improvement Candidates", ""]
+    for item in ionos.get("improvement_candidates", []):
+        lines.append(f"- `{item['candidate']}`: `{item['status']}` - {item['reason']}")
+    lines += [
+        "",
+        "## Guardrails",
+        "",
+        "- Raw request counts remain unchanged; only repeated operational recommendations are grouped.",
+        "- Actor correlation is not causality and does not authorize an actor-wide block.",
+        "- Expected-response candidates require workflow evidence before any repair.",
+        "- No WordPress, hosting, Cloudflare, firewall, cache, or remote change is performed.",
+    ]
     return "\n".join(lines)
 
 
@@ -1308,8 +2217,26 @@ def logical_validation(report: Dict[str, Any], public_text: str) -> Dict[str, An
         "low_live_executable": False,
         "breach": False,
     }
-    if report.get("safety") != safety_expected:
+    safety = report.get("safety") if isinstance(report.get("safety"), dict) else {}
+    # The module boundary must stay exactly as declared; the canonical runtime
+    # fields are additional and must be present with a recorded source.
+    if {key: safety.get(key) for key in safety_expected} != safety_expected:
         findings.append("safety_flags_drift")
+    if safety.get("module_productive_apply_lock") is not True:
+        findings.append("module_apply_lock_missing")
+    if "runtime_emergency_stop" not in safety or "runtime_breach" not in safety:
+        findings.append("runtime_flags_missing")
+    if safety.get("runtime_flags_status") not in {"RUNTIME_FLAGS_RESOLVED", "RUNTIME_FLAGS_INCOMPLETE"}:
+        findings.append("runtime_flags_status_invalid")
+    wp_users_me = report.get("wp_users_me_diagnostic") if isinstance(
+        report.get("wp_users_me_diagnostic"), dict
+    ) else {}
+    if wp_users_me.get("classification") not in WP_USERS_ME_CLASSIFICATIONS:
+        findings.append("wp_users_me_classification_invalid")
+    if wp_users_me.get("productive_rule_applied") is not False:
+        findings.append("wp_users_me_productive_rule")
+    if wp_users_me.get("privacy", {}).get("privacy_status") != "WP_USERS_ME_PRIVACY_OK":
+        findings.append("wp_users_me_privacy_violation")
     if report["waf_decision"]["new_waf_rule_recommended"] is not False:
         findings.append("automatic_waf_recommendation")
     if report["ssl_tls_decision"]["ssl_downgrade_recommended"] is not False:
@@ -1318,6 +2245,22 @@ def logical_validation(report: Dict[str, Any], public_text: str) -> Dict[str, An
         findings.append("unsupported_user_impact")
     if any(row["causality_proven"] for row in report["actor_correlation"]):
         findings.append("actor_causality_claim")
+    ionos = report.get("ionos_webspace_evidence", {})
+    if ionos.get("automatic_apply") is not False:
+        findings.append("ionos_automatic_apply_enabled")
+    if ionos.get("causality_proven") is True:
+        findings.append("ionos_causality_claim")
+    if any(row.get("automatic_action") != "NO_ACTION" for row in ionos.get("row_classifications", [])):
+        findings.append("ionos_row_automatic_action")
+    if any(row.get("new_waf_rule_recommended") is not False for row in ionos.get("row_classifications", [])):
+        findings.append("ionos_row_waf_recommendation")
+    if any(item.get("causality_proven") is not False for item in ionos.get("synchronized_sequences", [])):
+        findings.append("ionos_sequence_causality_claim")
+    for item in ionos.get("synchronized_sequences", []):
+        expected_raw = item.get("source_count_per_path", 0) * item.get("path_count", 0)
+        if item.get("raw_request_observations") != expected_raw:
+            findings.append("ionos_sequence_count_mismatch")
+    findings.extend(f"ionos_input:{item}" for item in ionos.get("validation_findings", []))
     unsafe_git = [
         path for path in report["git_checkpoint"]["recommended_files"]
         if path.startswith(("reports/", "state/", "audit/", "exports/", "backups/", "snapshots/"))
@@ -1344,10 +2287,12 @@ def write_outputs(report: Dict[str, Any], public_text: str, record: bool) -> Non
     for code, path in STATUS_REPORTS.items():
         write_text(path, render_status(report, code))
     write_text(PATH_MD, render_paths(report))
+    write_text(WP_USERS_ME_MD, render_wp_users_me(report))
     write_text(ACTOR_MD, render_actors(report))
     write_text(TIMELINE_MD, render_timeline(report))
     write_text(OWNER_PLAN_MD, render_owner_plan(report))
     write_text(EVIDENCE_GAP_MD, render_evidence_gap(report))
+    write_text(IONOS_ANALYSIS_MD, render_ionos_analysis(report))
     write_text(PUBLIC_MD, public_text)
     write_text(VALIDATION_MD, render_validation(report))
 
@@ -1437,6 +2382,98 @@ def self_test() -> Dict[str, Any]:
         {"top_5xx_actor_signals": [{"actor_signal": "sitelockspider_actor", "count": 100}], "top_5xx_paths": []},
         [],
     )
+    mixed_status_rows = correlate_paths(
+        {
+            "top_5xx_paths": [{
+                "path": "/",
+                "statuses": [{"status": 503, "count": 48}, {"status": 504, "count": 1381}],
+                "cache_status": [{"cache_status": "dynamic", "count": 48}, {"cache_status": "miss", "count": 1381}],
+                "actor_signal_counts": [
+                    {"actor_signal": "sitelockspider_actor", "count": 48},
+                    {"actor_signal": "nginx_early_hints_actor", "count": 1381},
+                ],
+                "user_agent_groups": [
+                    {"group": "SiteLockSpider", "count": 48},
+                    {"group": "nginx-ssl early hints", "count": 1381},
+                ],
+                "countries": [{"country": "US", "count": 48}, {"country": "FR", "count": 1381}],
+                "request_shape_counts": [
+                    {"request_shape": "generic_origin_shape", "count": 48},
+                    {"request_shape": "generic_timeout_shape", "count": 1381},
+                ],
+                "failure_mode_counts": [
+                    {"failure_mode": "origin_php_or_upstream_error", "count": 48},
+                    {"failure_mode": "cloudflare_to_origin_timeout", "count": 1381},
+                ],
+            }]
+        },
+        "2026-07-16T17:16:39Z",
+    )
+    mixed_by_status = {row["status_code"]: row for row in mixed_status_rows}
+    synthetic_ionos_rows, synthetic_ionos_findings = normalize_ionos_rows({
+        "key_rows": [
+            {"path": "/", "status": 503, "count": 432, "source_priority": "HIGH"},
+            {"path": "/page/2/", "status": 503, "count": 432, "source_priority": "HIGH"},
+            {"path": "/wp-admin/images/w-logo-gray.png", "status": 503, "count": 432, "source_priority": "LOW"},
+            {"path": "/wp-json/wp/v2/users/me", "status": 401, "count": 112},
+            {"path": "/wp-comments-post.php", "status": 405, "count": 73},
+            {"path": "/hello-world/", "status": 410, "count": 63},
+            {"path": "/wp-content/plugins/fix/up.php", "status": 404, "count": 31},
+            {"path": "/ALFA_DATA/alfacgiapi/perl.alfa", "status": 503, "count": 29},
+            {"path": "/wp-admin/admin-ajax.php", "status": 403, "count": 528},
+            {"path": "/", "status": 404, "count": 50},
+            {"path": "/", "status": 429, "count": 25},
+        ]
+    })
+    synthetic_ionos_classified = [classify_ionos_response(row) for row in synthetic_ionos_rows]
+    synthetic_ionos_by_key = {
+        (row["path"], row["status"]): row for row in synthetic_ionos_classified
+    }
+    synthetic_sequences = detect_synchronized_sequences(
+        synthetic_ionos_classified,
+        [
+            {"status_code": 503, "path": "/", "count": 48, "actor_signal": "sitelockspider_actor"},
+            {"status_code": 503, "path": "/page/2/", "count": 48, "actor_signal": "sitelockspider_actor"},
+            {"status_code": 503, "path": "/wp-admin/images/w-logo-gray.png", "count": 48, "actor_signal": "sitelockspider_actor"},
+        ],
+    )
+    synthetic_503_sequence = next(item for item in synthetic_sequences if item["status"] == 503)
+    synthetic_504_growth = {
+        503: {"status": 503, **calculate_delta(297, 155)},
+        504: {"status": 504, **calculate_delta(462, 1450)},
+        522: {"status": 522, **calculate_delta(2, 1)},
+        526: {"status": 526, **calculate_delta(2, 0)},
+    }
+    synthetic_504_priority = choose_priorities(
+        synthetic_504_growth,
+        tls_diagnostic(synthetic_504_growth[526], []),
+        {"synchronized_sequences": synthetic_sequences},
+    )
+    invalid_freshness = evaluate_evidence_freshness(None, datetime(2026, 7, 16, tzinfo=timezone.utc))
+    synthetic_wp_users_me = build_wp_users_me_diagnostic({
+        "origin_pressure_breakdown": {
+            "top_5xx_paths": [{
+                "path": WP_USERS_ME_PATH,
+                "count": 62,
+                "hostnames": ["example.invalid"],
+                "statuses": [{"status": 504, "count": 62}],
+                "countries": [
+                    {"country": "US", "count": 22},
+                    {"country": "VN", "count": 8},
+                    {"country": "IN", "count": 4},
+                    {"country": "FR", "count": 4},
+                ],
+                "cache_status": [{"cache_status": "miss", "count": 62}],
+                "user_agent_groups": [{"group": "nginx-ssl early hints", "count": 53}],
+                "actor_signal_counts": [{"actor_signal": "nginx_early_hints_actor", "count": 62}],
+                "failure_mode_counts": [{"failure_mode": "cloudflare_to_origin_timeout", "count": 62}],
+                "request_shape_counts": [{"request_shape": "wordpress_or_legacy_shape", "count": 62}],
+                "security_actions_24h": [],
+                "top_paths_24h_request_count": 101,
+            }]
+        }
+    })
+    synthetic_safety = build_safety_block()
     source = Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports: List[str] = []
@@ -1479,6 +2516,73 @@ def self_test() -> Dict[str, Any]:
             row["causality_proven"] is False and row["block_user_agent"] is False and row["new_waf_rule_recommended"] is False
             for row in sitelock
         ),
+        "test_e_status_specific_actor_correlation": (
+            mixed_by_status[503]["actor_signal"] == "sitelockspider_actor"
+            and mixed_by_status[504]["actor_signal"] == "nginx_early_hints_actor"
+            and mixed_by_status[503]["user_agent_group"] == "SiteLockSpider"
+            and mixed_by_status[504]["user_agent_group"] == "nginx-ssl early hints"
+        ),
+        "test_e_ambiguous_dimension_not_assigned": infer_status_dimension(
+            {
+                "statuses": [{"status": 503, "count": 48}, {"status": 504, "count": 1381}],
+                "actor_signal_counts": [{"actor_signal": "incomplete_actor", "count": 47}],
+            },
+            "actor_signal_counts",
+            "actor_signal",
+        ) == {},
+        "ionos_rows_normalized": len(synthetic_ionos_rows) == 11 and not synthetic_ionos_findings,
+        "ionos_rest_401_expected_candidate": (
+            synthetic_ionos_by_key[("/wp-json/wp/v2/users/me", 401)]["operational_class"]
+            == "EXPECTED_UNAUTHENTICATED_RESPONSE_CANDIDATE"
+        ),
+        "ionos_comments_405_expected_candidate": (
+            synthetic_ionos_by_key[("/wp-comments-post.php", 405)]["operational_class"]
+            == "EXPECTED_METHOD_RESTRICTION_CANDIDATE"
+        ),
+        "ionos_hello_world_410_expected_candidate": (
+            synthetic_ionos_by_key[("/hello-world", 410)]["operational_class"]
+            == "INTENTIONAL_REMOVAL_CANDIDATE"
+        ),
+        "ionos_scanner_404_no_repair": (
+            synthetic_ionos_by_key[("/wp-content/plugins/fix/up.php", 404)]["operational_class"]
+            == "EXPECTED_SCANNER_REJECTION"
+        ),
+        "ionos_scanner_503_still_origin_signal": (
+            synthetic_ionos_by_key[("/ALFA_DATA/alfacgiapi/perl.alfa", 503)]["operational_class"]
+            == "SCANNER_CORRELATED_ORIGIN_FAILURE"
+            and synthetic_ionos_by_key[("/ALFA_DATA/alfacgiapi/perl.alfa", 503)]["counts_as_origin_availability_signal"] is True
+        ),
+        "ionos_admin_ajax_403_requires_context": (
+            synthetic_ionos_by_key[("/wp-admin/admin-ajax.php", 403)]["operational_class"]
+            == "ADMIN_AJAX_SECURITY_OR_WORKFLOW_CONTEXT_REQUIRED"
+        ),
+        "ionos_root_404_requires_request_shape": (
+            synthetic_ionos_by_key[("/", 404)]["operational_class"] == "ROOT_ROUTING_CONTEXT_REQUIRED"
+        ),
+        "ionos_root_429_requires_issuer": (
+            synthetic_ionos_by_key[("/", 429)]["operational_class"] == "RATE_LIMIT_ISSUER_REVIEW"
+        ),
+        "ionos_sequence_deduplicates_action_not_counts": (
+            synthetic_503_sequence["raw_request_observations"] == 1296
+            and synthetic_503_sequence["operational_incident_groups"] == 1
+            and synthetic_503_sequence["request_duplication_proven"] is False
+        ),
+        "ionos_sequence_cross_source_actor_correlation": (
+            synthetic_503_sequence["repeated_sequence_supported"] is True
+            and synthetic_503_sequence["cross_source_actor_signal"] == "sitelockspider_actor"
+            and synthetic_503_sequence["causality_proven"] is False
+        ),
+        "ionos_missing_timestamp_excluded": (
+            invalid_freshness["freshness_status"] == "INVALID_TIMESTAMP"
+            and invalid_freshness["included_in_master_status"] is False
+        ),
+        "owner_priority_current_504_growth": (
+            synthetic_504_priority["selected_detail_priority"] == "ORIGIN_504_GROWTH_DIAGNOSIS"
+        ),
+        "ionos_no_automatic_actions": all(
+            row["automatic_action"] == "NO_ACTION" and row["new_waf_rule_recommended"] is False
+            for row in synthetic_ionos_classified
+        ),
         "test_f_user_impact_unknown": "unknown" == "unknown",
         "test_g_public_sanitized": not public_findings(synthetic_public),
         "test_h_emergency_boundaries": (
@@ -1506,6 +2610,45 @@ def self_test() -> Dict[str, Any]:
             and SAFETY_FLAGS["medium_executable"] is False
             and SAFETY_FLAGS["low_live_executable"] is False
             and SAFETY_FLAGS["breach"] is False
+        ),
+        "wp_users_me_origin_timeout_classified": (
+            synthetic_wp_users_me["classification"] == "WP_USERS_ME_ORIGIN_TIMEOUT"
+            and synthetic_wp_users_me["evidence"]["request_frequency"]["status_504_24h"] == 62
+            and synthetic_wp_users_me["causality_proven"] is False
+            and synthetic_wp_users_me["productive_rule_applied"] is False
+            and synthetic_wp_users_me["new_waf_rule_recommended"] is False
+        ),
+        "wp_users_me_bot_signal_recorded": (
+            "WP_USERS_ME_BOT_OR_SCANNER" in synthetic_wp_users_me["secondary_classifications"]
+        ),
+        "wp_users_me_no_identity_material": (
+            synthetic_wp_users_me["privacy"]["privacy_status"] == "WP_USERS_ME_PRIVACY_OK"
+            and synthetic_wp_users_me["privacy"]["cookies_stored"] is False
+            and synthetic_wp_users_me["privacy"]["authorization_headers_stored"] is False
+            and synthetic_wp_users_me["privacy"]["tokens_stored"] is False
+            and synthetic_wp_users_me["privacy"]["user_ids_collected"] is False
+        ),
+        "wp_users_me_privacy_scan_detects_identity_keys": privacy_scan(
+            {"evidence": {"cookie": "x", "rows": [{"user_id": 7}]}}
+        ) != [],
+        "wp_users_me_polling_requires_temporal_evidence": (
+            synthetic_wp_users_me["evidence"]["temporal_clustering"] == "EVIDENCE_NOT_COLLECTED"
+            and all(
+                item["matched"] is False
+                for item in synthetic_wp_users_me["candidate_classifications"]
+                if item["classification"] == "WP_USERS_ME_PLUGIN_POLLING"
+            )
+        ),
+        "wp_users_me_missing_row_is_insufficient": (
+            build_wp_users_me_diagnostic({})["classification"] == "WP_USERS_ME_EVIDENCE_INSUFFICIENT"
+        ),
+        "wp_users_me_allowed_classifications": (
+            set(WP_USERS_ME_CLASSIFICATIONS) == set(WP_USERS_ME_CLASSIFICATION_PRIORITY)
+            and synthetic_wp_users_me["classification"] in WP_USERS_ME_CLASSIFICATIONS
+        ),
+        "runtime_flags_not_hardcoded": (
+            "runtime_emergency_stop" in synthetic_safety
+            and synthetic_safety["module_productive_apply_lock"] is True
         ),
         "no_waf_automation": all(row["new_waf_rule_recommended"] is False for row in sitelock),
         "git_recommendation_safe": not any(
@@ -1543,6 +2686,9 @@ def print_status(report: Dict[str, Any]) -> None:
         print(f"{code}_TREND_{item.get('trend', 'UNKNOWN')}")
     print(f"526_STATUS_{report.get('origin_tls_diagnostic', {}).get('status', 'UNKNOWN')}")
     print(f"OWNER_PRIORITY_{report.get('owner_priority', {}).get('selected_detail_priority', 'UNKNOWN')}")
+    ionos = report.get("ionos_webspace_evidence", {})
+    print(ionos.get("status", "IONOS_EVIDENCE_MISSING"))
+    print(f"IONOS_SYNCHRONIZED_SEQUENCES_{len(ionos.get('synchronized_sequences', []))}")
     print("VERIFIED_USER_IMPACT_UNKNOWN")
     print("NEW_WAF_RULE_RECOMMENDED_FALSE")
     print("SSL_DOWNGRADE_RECOMMENDED_FALSE")
@@ -1563,7 +2709,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     group.add_argument("--analyze-522", action="store_true")
     group.add_argument("--analyze-526", action="store_true")
     group.add_argument("--correlate-paths", action="store_true")
+    group.add_argument("--analyze-wp-users-me", action="store_true")
     group.add_argument("--correlate-actors", action="store_true")
+    group.add_argument("--analyze-ionos-evidence", action="store_true")
     group.add_argument("--build-timeline", action="store_true")
     group.add_argument("--build-owner-plan", action="store_true")
     group.add_argument("--build-public-summary", action="store_true")
@@ -1600,8 +2748,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"526_STATUS_{report['origin_tls_diagnostic']['status']}")
     elif args.correlate_paths:
         print(f"ORIGIN_PATH_CORRELATION_ROWS_{len(report['path_correlation'])}")
+    elif args.analyze_wp_users_me:
+        diagnostic = report["wp_users_me_diagnostic"]
+        print(diagnostic["classification"])
+        print(f"WP_USERS_ME_504_{diagnostic.get('evidence', {}).get('request_frequency', {}).get('status_504_24h', 0)}")
+        print(f"CONFIDENCE_{diagnostic.get('confidence', 'none')}")
+        print(f"PRIVACY_{diagnostic.get('privacy', {}).get('privacy_status', 'WP_USERS_ME_PRIVACY_OK')}")
+        print(f"PRODUCTIVE_RULE_APPLIED_{str(diagnostic.get('productive_rule_applied', False)).lower()}")
     elif args.correlate_actors:
         print(f"ORIGIN_ACTOR_CORRELATION_ROWS_{len(report['actor_correlation'])}")
+    elif args.analyze_ionos_evidence:
+        ionos = report["ionos_webspace_evidence"]
+        print(ionos["status"])
+        print(f"IONOS_ROWS_{ionos['imported_rows']}")
+        print(f"IONOS_SYNCHRONIZED_SEQUENCES_{len(ionos['synchronized_sequences'])}")
     elif args.build_timeline:
         print("ORIGIN_TIMELINE_READY")
     elif args.build_owner_plan:

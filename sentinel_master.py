@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import sentinel_canonical_truth as canonical_truth
+
 
 PROJECT_DIR = Path("/srv/sentinel-defense")
 
@@ -3516,6 +3518,121 @@ def local_has_ufw_read_issue(local_data: Optional[Dict[str, Any]]) -> bool:
     )
 
 
+CANONICAL_HEADER_FIELDS = (
+    "overall_status",
+    "website_status",
+    "website_correlation_status",
+    "local_status",
+    "runtime_status",
+    "runtime_stage",
+    "autonomy_level",
+    "monitoring_enabled",
+    "timer_active",
+    "timer_enabled",
+    "scheduler_status",
+    "low_live_enabled",
+    "medium_live_enabled",
+    "high_live_enabled",
+    "production_apply_lock",
+    "emergency_stop",
+    "breach",
+    "circuit_breaker_status",
+    "rollback_status",
+    "write_canary_status",
+    "promotion_status",
+    "owner_priority",
+    "total_5xx",
+    "http_504",
+    "http_503",
+    "http_522",
+    "http_526",
+    "nowplaying_504",
+    "nowplaying_classification",
+    "wp_users_me_504",
+    "wp_users_me_classification",
+    "source_map_404",
+    "source_map_status",
+    "rolling_window_status",
+    "current_snapshot_id",
+    "current_growth",
+)
+
+
+def load_canonical_truth_snapshot() -> Dict[str, Any]:
+    """Phase 10.21: the canonical snapshot is the only source of current runtime truth.
+
+    The master timer runs independently of the production pipeline, so a stale
+    persisted snapshot is re-resolved in memory rather than reported as current.
+    """
+    snapshot = canonical_truth.load_or_resolve()
+    return snapshot if isinstance(snapshot, dict) else {}
+
+
+def build_canonical_header(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Flat current-truth header. Missing values stay UNKNOWN — never a legacy value."""
+    canonical = snapshot.get("canonical") if isinstance(snapshot.get("canonical"), dict) else {}
+    header: Dict[str, Any] = {
+        "canonical_truth_status": snapshot.get("status", "NOT_AVAILABLE"),
+        "canonical_generated_at": snapshot.get("generated_at_utc"),
+        "missing_fields": snapshot.get("missing_fields", []),
+    }
+    for field in CANONICAL_HEADER_FIELDS:
+        block = canonical.get(field)
+        if isinstance(block, dict) and block.get("resolution") == "RESOLVED":
+            header[field] = block.get("value")
+            header[f"{field}__source"] = block.get("source")
+            header[f"{field}__freshness"] = block.get("freshness")
+        else:
+            header[field] = None
+            header[f"{field}__source"] = None
+            header[f"{field}__freshness"] = canonical_truth.MISSING
+    priority = canonical.get("owner_priority") if isinstance(canonical.get("owner_priority"), dict) else {}
+    header["owner_priority_rank"] = priority.get("rank")
+    header["owner_priority_reason"] = priority.get("rank_reason")
+    header["owner_priority_suppressed"] = priority.get("suppressed_lower_priorities", [])
+    header["legacy_seo_checklist_allowed"] = priority.get("legacy_seo_checklist_allowed", False)
+    return header
+
+
+def canonical_truth_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    if not snapshot:
+        return {"present": False, "status": "NOT_AVAILABLE"}
+    counts = snapshot.get("counts", {}) if isinstance(snapshot.get("counts"), dict) else {}
+    return {
+        "present": True,
+        "status": snapshot.get("status"),
+        "generated_at_utc": snapshot.get("generated_at_utc"),
+        "schema_version": snapshot.get("schema_version"),
+        "missing_fields": snapshot.get("missing_fields", []),
+        "resolved_fields": counts.get("resolved_fields"),
+        "unresolved_fields": counts.get("unresolved_fields"),
+        "current_sources": counts.get("current_sources"),
+        "stale_excluded_sources": counts.get("stale_excluded_sources"),
+        "precedence": snapshot.get("precedence", []),
+    }
+
+
+def legacy_supersession_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    legacy = snapshot.get("legacy_supersession") if isinstance(snapshot.get("legacy_supersession"), dict) else {}
+    if not legacy:
+        return {"present": False}
+    return {
+        "present": True,
+        "status": legacy.get("status"),
+        "counts": legacy.get("counts", {}),
+        "legacy_modules": legacy.get("legacy_modules", []),
+        "superseded_field_claims": legacy.get("superseded_field_claims", []),
+        "conflicting_field_claims": legacy.get("conflicting_field_claims", []),
+        "retention": legacy.get("retention"),
+    }
+
+
+def canonical_cell(header: Dict[str, Any], field: str) -> Any:
+    """Value for an executive table cell; None renders as UNKNOWN, never as legacy."""
+    value = header.get(field)
+    return canonical_truth.UNKNOWN if value is None else value
+
+
 def compute_overall_master_status(
     website_status: str,
     website_present: bool,
@@ -3891,6 +4008,8 @@ def build_report(
     safe_sftp_lane_data, safe_sftp_lane_error, safe_sftp_lane_exists = read_json(safe_sftp_seo_apply_lane_json)
     production_pipeline_data, production_pipeline_error, production_pipeline_exists = read_json(DEFAULT_PRODUCTION_PIPELINE_JSON)
     nowplaying_recovery_data, nowplaying_recovery_error, nowplaying_recovery_exists = read_json(DEFAULT_NOWPLAYING_RECOVERY_JSON)
+    canonical_truth_snapshot = load_canonical_truth_snapshot()
+    canonical_header = build_canonical_header(canonical_truth_snapshot)
 
     # Optional self-comparison: read the previous master report (if any) before
     # it is overwritten. Informational only; never affects current status.
@@ -4000,7 +4119,7 @@ def build_report(
         )
     else:
         recommendations.append(
-            "Autonomy Policy Layer ist policy-only; HIGH blockiert, "
+            "Legacy Autonomy Policy Layer (superseded) ist policy-only; HIGH blockiert, "
             f"apply_status {safe_text(autonomy_summary.get('apply_status_summary'))} "
             f"auf {safe_text(autonomy_summary.get('current_autonomy_level'))}."
         )
@@ -4468,7 +4587,7 @@ def build_report(
             )
         else:
             recommendations.append(
-                "Owner Daily Action Summary: "
+                "Legacy Owner Daily Action Summary (superseded): "
                 f"owner_status={safe_text(owner_daily_action_summary.get('owner_status'))}, "
                 f"next={safe_text(owner_daily_action_summary.get('recommended_next_owner_action'))}"
             )
@@ -4683,7 +4802,7 @@ def build_report(
             )
         else:
             recommendations.append(
-                "Safe Draft Autonomy Scheduler Plan: review-only, kein Timer installiert, kein Live-Apply; "
+                "Legacy Safe Draft Autonomy Scheduler Plan (superseded): review-only, kein Timer installiert, kein Live-Apply; "
                 f"status={safe_draft_scheduler_summary.get('scheduler_status')}, "
                 f"frequency={safe_draft_scheduler_summary.get('planned_frequency')}, "
                 f"timer={safe_draft_scheduler_summary.get('timer_installation_status')}, "
@@ -4708,7 +4827,7 @@ def build_report(
             )
         else:
             recommendations.append(
-                "Safe Draft Autonomy Timer Draft: review-only Drafts unter drafts/apply, kein Timer installiert, "
+                "Legacy Safe Draft Autonomy Timer Draft (superseded): review-only Drafts unter drafts/apply, kein Timer installiert, "
                 "kein Live-Apply; "
                 f"status={safe_draft_timer_summary.get('timer_draft_status')}, "
                 f"timer={safe_draft_timer_summary.get('timer_installation_status')}, "
@@ -5448,6 +5567,10 @@ def build_report(
         "production_pipeline": production_pipeline_data if production_pipeline_exists and isinstance(production_pipeline_data, dict) else {"present": False},
         "nowplaying_recovery_status": nowplaying_recovery_data.get("status") if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else "NOT_AVAILABLE",
         "nowplaying_recovery": nowplaying_recovery_data if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else {"present": False},
+        "canonical_truth_status": canonical_truth_snapshot.get("status", "NOT_AVAILABLE"),
+        "canonical_truth": canonical_truth_summary(canonical_truth_snapshot),
+        "canonical_header": canonical_header,
+        "legacy_supersession": legacy_supersession_summary(canonical_truth_snapshot),
         "self_comparison": self_comparison,
         "sources": {
             "website": website_summary,
@@ -6172,7 +6295,7 @@ def render_cloudflare_challenge_diagnosis(diagnosis: Optional[Dict[str, Any]]) -
 
 
 def render_autonomy_policy(autonomy: Dict[str, Any]) -> List[str]:
-    lines = ["## Autonomy & Improvement Policy", ""]
+    lines = ["## Autonomy & Improvement Policy (Legacy / Superseded)", ""]
     if not autonomy or not autonomy.get("present"):
         lines.extend(
             [
@@ -6578,7 +6701,7 @@ def render_post_manual_validation(validation: Dict[str, Any]) -> List[str]:
 
 
 def render_owner_daily_action_summary(owner: Dict[str, Any]) -> List[str]:
-    lines = ["## Owner Daily Action Summary", ""]
+    lines = ["## Owner Daily Action Summary (Legacy / Superseded)", ""]
     if not owner or not owner.get("present"):
         lines.extend(
             [
@@ -6768,7 +6891,7 @@ def render_safe_apply_preflight_validator(preflight: Dict[str, Any]) -> List[str
 
 
 def render_autonomy_runtime_lock(lock: Dict[str, Any]) -> List[str]:
-    lines = ["## Autonomy Runtime Lock", ""]
+    lines = ["## Autonomy Runtime Lock (Legacy / Superseded)", ""]
     if not lock or not lock.get("present"):
         lines.extend(
             [
@@ -6853,7 +6976,7 @@ def render_safe_draft_autonomy_verifier(verifier: Dict[str, Any]) -> List[str]:
 
 
 def render_safe_draft_autonomy_scheduler_plan(plan: Dict[str, Any]) -> List[str]:
-    lines = ["## Safe Draft Autonomy Scheduler Plan", ""]
+    lines = ["## Safe Draft Autonomy Scheduler Plan (Legacy / Superseded)", ""]
     if not plan or not plan.get("present"):
         lines.extend(
             [
@@ -6882,7 +7005,7 @@ def render_safe_draft_autonomy_scheduler_plan(plan: Dict[str, Any]) -> List[str]
 
 
 def render_safe_draft_autonomy_timer_draft(timer: Dict[str, Any]) -> List[str]:
-    lines = ["## Safe Draft Autonomy Timer Draft", ""]
+    lines = ["## Safe Draft Autonomy Timer Draft (Legacy / Superseded)", ""]
     if not timer or not timer.get("present"):
         lines.extend(
             [
@@ -6914,7 +7037,7 @@ def render_safe_draft_autonomy_timer_draft(timer: Dict[str, Any]) -> List[str]:
 
 
 def render_safe_draft_autonomy_timer_install_review(review: Dict[str, Any]) -> List[str]:
-    lines = ["## Safe Draft Autonomy Timer Install Review", ""]
+    lines = ["## Safe Draft Autonomy Timer Install Review (Legacy / Superseded)", ""]
     if not review or not review.get("present"):
         lines.extend(
             [
@@ -6946,7 +7069,7 @@ def render_safe_draft_autonomy_timer_install_review(review: Dict[str, Any]) -> L
 
 
 def render_owner_manual_timer_install_packet(packet: Dict[str, Any]) -> List[str]:
-    lines = ["## Owner Manual Timer Install Packet", ""]
+    lines = ["## Owner Manual Timer Install Packet (Legacy / Superseded)", ""]
     if not packet or not packet.get("present"):
         lines.extend(
             [
@@ -7114,7 +7237,7 @@ def render_safe_draft_autonomy_final_safety(final: Dict[str, Any]) -> List[str]:
 
 
 def render_manual_evidence_review_dashboard(dashboard: Dict[str, Any]) -> List[str]:
-    lines = ["## Manual Evidence Review Dashboard", ""]
+    lines = ["## Manual Evidence Review Dashboard (Legacy / Superseded)", ""]
     if not dashboard or not dashboard.get("present"):
         lines.extend(
             [
@@ -7243,7 +7366,7 @@ def render_owner_evidence_review_console(console: Dict[str, Any]) -> List[str]:
 
 
 def render_final_owner_decision_snapshot(snapshot: Dict[str, Any]) -> List[str]:
-    lines = ["## Final Owner Decision Snapshot", ""]
+    lines = ["## Final Owner Decision Snapshot (Legacy / Superseded)", ""]
     if not snapshot or not snapshot.get("present"):
         lines.extend(
             [
@@ -7762,6 +7885,112 @@ def render_concrete_seo_performance_optimizer(optimizer: Dict[str, Any]) -> List
     return lines
 
 
+def render_canonical_runtime_section(
+    header: Dict[str, Any], summary: Dict[str, Any]
+) -> List[str]:
+    """Runtime section with per-field provenance; no Level-1 data may appear here."""
+    lines = [
+        "## Runtime Status (Canonical)",
+        "",
+        f"- Canonical truth status: {md_status(summary.get('status', 'NOT_AVAILABLE'))}",
+        f"- Canonical snapshot: {md_status(header.get('canonical_generated_at'))}",
+        f"- Resolved fields: {md_status(summary.get('resolved_fields'))}, "
+        f"unresolved: {md_status(summary.get('unresolved_fields'))}",
+        "",
+        "| Field | Value | Source | Freshness |",
+        "|---|---|---|---|",
+    ]
+    for field in (
+        "autonomy_level",
+        "runtime_stage",
+        "runtime_status",
+        "monitoring_enabled",
+        "timer_active",
+        "timer_enabled",
+        "scheduler_status",
+        "low_live_enabled",
+        "medium_live_enabled",
+        "high_live_enabled",
+        "production_apply_lock",
+        "circuit_breaker_status",
+        "rollback_status",
+        "write_canary_status",
+        "promotion_status",
+        "emergency_stop",
+        "breach",
+        "owner_priority",
+    ):
+        lines.append(
+            f"| `{field}` | {md_status(canonical_cell(header, field))} | "
+            f"{md_status(header.get(f'{field}__source'))} | "
+            f"{md_status(header.get(f'{field}__freshness'))} |"
+        )
+    lines.extend([
+        "",
+        "- Legacy Level-1 data never appears in this section.",
+        f"- Owner priority rank: {md_status(header.get('owner_priority_rank'))}",
+        f"- Suppressed lower priorities: "
+        f"{md_status(', '.join(header.get('owner_priority_suppressed', [])) or 'none')}",
+        f"- Legacy SEO checklist may lead: {md_status(header.get('legacy_seo_checklist_allowed'))}",
+        "",
+    ])
+    return lines
+
+
+def render_legacy_historical_modules(legacy: Dict[str, Any]) -> List[str]:
+    """Historical modules stay visible, explicitly labelled and without effect."""
+    lines = ["## Legacy / Historical Modules", ""]
+    if not legacy.get("present"):
+        lines.extend([
+            "- No legacy supersession snapshot is available (run `sentinel_canonical_truth.py --resolve`).",
+            "",
+        ])
+        return lines
+    counts = legacy.get("counts", {}) if isinstance(legacy.get("counts"), dict) else {}
+    lines.extend([
+        f"- Status: {md_status(legacy.get('status'))}",
+        f"- Retention: {safe_text(legacy.get('retention'))}",
+        f"- Legacy modules: {md_status(counts.get('legacy_modules'))}, "
+        f"superseded field claims: {md_status(counts.get('superseded'))}, "
+        f"conflicts neutralized: {md_status(counts.get('conflicts_neutralized'))}",
+        "",
+        "| Legacy module | Generated | Freshness | Superseded by | Operational effect |",
+        "|---|---|---|---|---|",
+    ])
+    for row in legacy.get("legacy_modules", []):
+        superseded_by = ", ".join(row.get("superseded_by", [])) or "-"
+        lines.append(
+            f"| {md_status(row.get('legacy_source'))} | {md_status(row.get('generated_at'))} | "
+            f"{md_status(row.get('freshness'))} | {md_status(superseded_by)} | `false` |"
+        )
+    claims = legacy.get("superseded_field_claims", [])
+    if claims:
+        lines.extend([
+            "",
+            "| Canonical field | Legacy value | Canonical value | Freshness | Operational effect |",
+            "|---|---|---|---|---|",
+        ])
+        for row in claims:
+            legacy_value = row.get("legacy_value")
+            canonical_value = row.get("canonical_value")
+            if isinstance(legacy_value, (dict, list)):
+                legacy_value = type(legacy_value).__name__
+            if isinstance(canonical_value, (dict, list)):
+                canonical_value = type(canonical_value).__name__
+            lines.append(
+                f"| {md_status(row.get('canonical_field'))} | {md_status(legacy_value)} | "
+                f"{md_status(canonical_value)} | {md_status(row.get('freshness'))} | `false` |"
+            )
+    lines.extend([
+        "",
+        "- Historical components, reports and state files are never deleted.",
+        "- A legacy value never overwrites a current runtime field, owner priority, systemd "
+        "state, emergency stop state, autonomy level or website metric.",
+        "",
+    ])
+    return lines
+
+
 def render_markdown(report: Dict[str, Any]) -> str:
     website = report["sources"]["website"]
     hetzner_local = report["sources"]["hetzner_local"]
@@ -7810,11 +8039,54 @@ def render_markdown(report: Dict[str, Any]) -> str:
     safe_end_integrity = report.get("safe_end_archive_integrity_verifier", {}) if isinstance(report.get("safe_end_archive_integrity_verifier"), dict) else {}
     concrete_optimizer = report.get("concrete_seo_performance_optimizer", {}) if isinstance(report.get("concrete_seo_performance_optimizer"), dict) else {}
     safe_sftp_lane = report.get("safe_sftp_seo_apply_lane", {}) if isinstance(report.get("safe_sftp_seo_apply_lane"), dict) else {}
+    canonical_header = report.get("canonical_header", {}) if isinstance(report.get("canonical_header"), dict) else {}
+    canonical_summary = report.get("canonical_truth", {}) if isinstance(report.get("canonical_truth"), dict) else {}
+    legacy_supersession = report.get("legacy_supersession", {}) if isinstance(report.get("legacy_supersession"), dict) else {}
+
+    def canonical_row(field: str) -> str:
+        return md_status(canonical_cell(canonical_header, field))
+
     lines = [
         "# Sentinel Master Report",
         "",
         f"**Generated:** `{safe_text(report.get('generated_at_utc'))}` UTC",
         "",
+        "## Canonical Runtime Truth (Phase 10.21)",
+        "",
+        f"- Canonical Truth Status: {md_status(report.get('canonical_truth_status'))}",
+        f"- Canonical Snapshot: {md_status(canonical_header.get('canonical_generated_at'))}",
+        f"- Runtime Level: {canonical_row('autonomy_level')}",
+        f"- Runtime Stage: {canonical_row('runtime_stage')}",
+        f"- Runtime Health: {canonical_row('runtime_status')}",
+        f"- 24/7 Monitoring: {canonical_row('monitoring_enabled')}",
+        f"- systemd Timer Active: {canonical_row('timer_active')}",
+        f"- Scheduler: {canonical_row('scheduler_status')}",
+        f"- LOW_LIVE: {canonical_row('low_live_enabled')}",
+        f"- MEDIUM: {canonical_row('medium_live_enabled')}",
+        f"- HIGH: {canonical_row('high_live_enabled')}",
+        f"- Production Apply Lock: {canonical_row('production_apply_lock')}",
+        f"- Circuit Breaker: {canonical_row('circuit_breaker_status')}",
+        f"- Rollback: {canonical_row('rollback_status')}",
+        f"- Write Canary: {canonical_row('write_canary_status')}",
+        f"- Promotion: {canonical_row('promotion_status')}",
+        f"- Emergency Stop: {canonical_row('emergency_stop')}",
+        f"- Breach: {canonical_row('breach')}",
+        f"- Owner Priority: {canonical_row('owner_priority')}",
+        f"- Owner Priority Rank: {md_status(canonical_header.get('owner_priority_rank'))}",
+        f"- Owner Priority Reason: {safe_text(canonical_header.get('owner_priority_reason'))}",
+        "",
+        "Legacy Level-1 modules never provide these values. Historical results are listed "
+        "separately under `Legacy / Historical Modules`.",
+        "",
+    ]
+    if canonical_header.get("missing_fields"):
+        lines.extend([
+            f"- Canonical Truth Incomplete, missing fields: "
+            f"`{', '.join(canonical_header['missing_fields'])}`",
+            "- No legacy value is substituted for a missing current value.",
+            "",
+        ])
+    lines.extend([
         "## Master-Bewertung",
         "",
         "| Signal | Status |",
@@ -7824,17 +8096,37 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Hetzner Local Status | {md_status(report.get('hetzner_local_status'))} |",
         f"| Private PC Local Status | {md_status(report.get('private_pc_local_status'))} |",
         f"| Private PC Last Known Local Confirmation | {md_status(report.get('private_pc_last_known_local_confirmation'))} |",
-        f"| SourceMap Prevention Status | {md_status(report.get('sourcemap_prevention_status'))} |",
+        f"| Canonical Runtime Level | {canonical_row('autonomy_level')} |",
+        f"| Canonical Runtime Stage | {canonical_row('runtime_stage')} |",
+        f"| Canonical Monitoring Enabled | {canonical_row('monitoring_enabled')} |",
+        f"| Canonical systemd Timer Active | {canonical_row('timer_active')} |",
+        f"| Canonical Scheduler Status | {canonical_row('scheduler_status')} |",
+        f"| Canonical LOW_LIVE Enabled | {canonical_row('low_live_enabled')} |",
+        f"| Canonical Production Apply Lock | {canonical_row('production_apply_lock')} |",
+        f"| Canonical Emergency Stop | {canonical_row('emergency_stop')} |",
+        f"| Canonical Breach | {canonical_row('breach')} |",
+        f"| Canonical Write Canary | {canonical_row('write_canary_status')} |",
+        f"| Canonical Promotion | {canonical_row('promotion_status')} |",
+        f"| Canonical Owner Priority | {canonical_row('owner_priority')} |",
+        f"| Canonical Total 5xx (24h) | {canonical_row('total_5xx')} |",
+        f"| Canonical NowPlaying 504 (24h) | {canonical_row('nowplaying_504')} |",
+        f"| Canonical NowPlaying Classification | {canonical_row('nowplaying_classification')} |",
+        f"| Canonical /wp-json users/me 504 (24h) | {canonical_row('wp_users_me_504')} |",
+        f"| Canonical /wp-json users/me Classification | {canonical_row('wp_users_me_classification')} |",
+        f"| Canonical SourceMap 404 (24h) | {canonical_row('source_map_404')} |",
+        f"| Canonical SourceMap Status | {canonical_row('source_map_status')} |",
+        f"| Canonical Rolling Window | {canonical_row('rolling_window_status')} |",
+        f"| Legacy SourceMap Prevention Status (superseded) | {md_status(report.get('sourcemap_prevention_status'))} |",
         f"| SourceMap Global Safe to Auto Apply | {md_status(sourcemap_prevention.get('global_safe_to_auto_apply'))} |",
         f"| SourceMap WPO-Minify Safe to Apply | {md_status(sourcemap_prevention.get('wpo_minify_safe_to_apply'))} |",
         f"| SourceMap Requires Operator Review | {md_status(sourcemap_prevention.get('requires_operator_review'))} |",
-        f"| AI-Radio Timeout Status | {md_status(report.get('ai_radio_timeout_status'))} |",
+        f"| Legacy AI-Radio Timeout Status (superseded) | {md_status(report.get('ai_radio_timeout_status'))} |",
         f"| AI-Radio Microcache Deployed | {md_status(ai_radio_timeout.get('microcache_remediation', {}).get('microcache_deployed'))} |",
         f"| AI-Radio Latest 5xx Delta | {md_status(ai_radio_timeout.get('rolling_window_status', {}).get('latest_5xx_delta'))} |",
         f"| AI-Radio Safe to Auto Apply | {md_status(ai_radio_timeout.get('safe_to_auto_apply'))} |",
         f"| AI-Radio Requires Operator Review | {md_status(ai_radio_timeout.get('requires_operator_review'))} |",
         f"| Autonomy Policy Status | {md_status(report.get('autonomy_policy_status'))} |",
-        f"| Autonomy Level | {md_status(autonomy_policy.get('current_autonomy_level'))} |",
+        f"| Legacy Autonomy Level (superseded) | {md_status(autonomy_policy.get('current_autonomy_level'))} |",
         f"| Autonomy Policy-Only | {md_status(autonomy_policy.get('policy_only'))} |",
         f"| Draft Execution Planner Status | {md_status(report.get('draft_execution_planner_status'))} |",
         f"| Draft Execution Items | {md_status(draft_execution_planner.get('execution_items_count'))} |",
@@ -7848,7 +8140,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Post-Manual Validation Status | {md_status(report.get('post_manual_validation_status'))} |",
         f"| Post-Manual Validation Warnings | {md_status(post_manual_validation.get('validation_warning_count'))} |",
         f"| Owner Daily Action Status | {md_status(owner_daily_action_summary.get('owner_status'))} |",
-        f"| Owner Next Action | {md_status(owner_daily_action_summary.get('recommended_next_owner_action'))} |",
+        f"| Legacy Owner Next Action (superseded) | {md_status(owner_daily_action_summary.get('recommended_next_owner_action'))} |",
         f"| Safe Apply Registry Status | {md_status(report.get('safe_apply_candidate_registry_status'))} |",
         f"| Safe Apply Registry Draft-only | {md_status(safe_apply_registry.get('registered_draft_only_count'))} |",
         f"| Safe Apply Registry Breach | {md_status(safe_apply_registry.get('registry_breach'))} |",
@@ -7869,7 +8161,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Safe Apply Preflight Breach | {md_status(safe_apply_preflight.get('preflight_breach'))} |",
         f"| Autonomy Runtime Lock Status | {md_status(report.get('autonomy_runtime_lock_status'))} |",
         f"| Autonomy Runtime Lock Live Apply | {md_status(autonomy_runtime_lock.get('live_apply_enabled'))} |",
-        f"| Autonomy Runtime Lock Emergency Stop | {md_status(autonomy_runtime_lock.get('emergency_stop'))} |",
+        f"| Legacy Autonomy Runtime Lock Emergency Stop (superseded) | {md_status(autonomy_runtime_lock.get('emergency_stop'))} |",
         f"| Autonomy Runtime Lock Breach | {md_status(autonomy_runtime_lock.get('runtime_lock_breach'))} |",
         f"| Safe Draft Runner Status | {md_status(report.get('safe_draft_autonomy_runner_status'))} |",
         f"| Safe Draft Runner Executed Draft-only | {md_status(safe_draft_runner.get('executed_draft_only_count'))} |",
@@ -7880,11 +8172,11 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Safe Draft Verifier Forbidden Path | {md_status(safe_draft_verifier.get('forbidden_path_count'))} |",
         f"| Safe Draft Verifier Breach | {md_status(safe_draft_verifier.get('verifier_breach'))} |",
         f"| Safe Draft Scheduler Plan Status | {md_status(report.get('safe_draft_autonomy_scheduler_plan_status'))} |",
-        f"| Safe Draft Scheduler Timer Install | {md_status(safe_draft_scheduler.get('timer_installation_status'))} |",
+        f"| Legacy Safe Draft Scheduler Timer Install (superseded) | {md_status(safe_draft_scheduler.get('timer_installation_status'))} |",
         f"| Safe Draft Scheduler Can Install Now | {md_status(safe_draft_scheduler.get('can_install_timer_now'))} |",
         f"| Safe Draft Scheduler Breach | {md_status(safe_draft_scheduler.get('scheduler_breach'))} |",
         f"| Safe Draft Timer Draft Status | {md_status(report.get('safe_draft_autonomy_timer_draft_status'))} |",
-        f"| Safe Draft Timer Installation | {md_status(safe_draft_timer.get('timer_installation_status'))} |",
+        f"| Legacy Safe Draft Timer Installation (superseded) | {md_status(safe_draft_timer.get('timer_installation_status'))} |",
         f"| Safe Draft Timer systemd Written | {md_status(safe_draft_timer.get('systemd_file_written'))} |",
         f"| Safe Draft Timer Breach | {md_status(safe_draft_timer.get('timer_draft_breach'))} |",
         f"| Safe Draft Timer Install Review Status | {md_status(report.get('safe_draft_autonomy_timer_install_review_status'))} |",
@@ -7917,7 +8209,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Safe Draft Final Breaches | {md_status(final_safety.get('total_breach_count'))} |",
         f"| Safe Draft Final Breach | {md_status(final_safety.get('final_safety_breach'))} |",
         f"| Manual Evidence Dashboard Status | {md_status(manual_evidence_dashboard.get('dashboard_status'))} |",
-        f"| Manual Evidence Dashboard Emergency Stop | {md_status(manual_evidence_dashboard.get('emergency_stop_active'))} |",
+        f"| Legacy Manual Evidence Dashboard Emergency Stop (superseded) | {md_status(manual_evidence_dashboard.get('emergency_stop_active'))} |",
         f"| Manual Evidence Dashboard Breaches | {md_status(manual_evidence_dashboard.get('total_breaches'))} |",
         f"| Manual Evidence Dashboard Install Allowed | {md_status(manual_evidence_dashboard.get('install_allowed_now'))} |",
         f"| Manual Evidence Dashboard Can Install | {md_status(manual_evidence_dashboard.get('can_install_timer_now'))} |",
@@ -7938,7 +8230,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Owner Review Console Breach | {md_status(owner_evidence_console.get('console_breach'))} |",
         f"| Final Owner Snapshot Status | {md_status(final_owner_snapshot.get('snapshot_status'))} |",
         f"| Final Owner Snapshot Review | {md_status(final_owner_snapshot.get('reviewed_count'))} / {md_status(final_owner_snapshot.get('total_items'))} |",
-        f"| Final Owner Snapshot Emergency Stop | {md_status(final_owner_snapshot.get('emergency_stop_active'))} |",
+        f"| Legacy Final Owner Snapshot Emergency Stop (superseded) | {md_status(final_owner_snapshot.get('emergency_stop_active'))} |",
         f"| Final Owner Snapshot Install Allowed | {md_status(final_owner_snapshot.get('install_allowed_now'))} |",
         f"| Final Owner Snapshot Breach | {md_status(final_owner_snapshot.get('snapshot_breach'))} |",
         f"| Master Critical Cause Status | {md_status(master_critical_cause.get('critical_snapshot_status'))} |",
@@ -7982,7 +8274,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Final Safety Seal Review Complete | {md_status(low_risk_final_seal.get('review_completed'))} |",
         f"| Final Safety Seal Breach | {md_status(low_risk_final_seal.get('seal_breach'))} |",
         f"| Safe End Status | {md_status(safe_end.get('safe_end_status'))} |",
-        f"| Safe End Emergency Stop | {md_status(safe_end.get('emergency_stop_active'))} |",
+        f"| Legacy Safe End Emergency Stop (superseded) | {md_status(safe_end.get('emergency_stop_active'))} |",
         f"| Safe End Live Apply | {md_status(safe_end.get('live_apply'))} |",
         f"| Safe End Install Allowed | {md_status(safe_end.get('install_allowed_now'))} |",
         f"| Safe End Breach | {md_status(safe_end.get('safe_end_breach'))} |",
@@ -8010,10 +8302,13 @@ def render_markdown(report: Dict[str, Any]) -> str:
         "",
         "## Empfehlungen",
         "",
-    ]
+    ])
     for recommendation in report.get("recommendations", []):
         lines.append(f"- {safe_text(recommendation)}")
     lines.append("")
+
+    lines.extend(render_canonical_runtime_section(canonical_header, canonical_summary))
+    lines.extend(render_legacy_historical_modules(legacy_supersession))
 
     lines.extend(render_source_detail("Website Sentinel", website))
     lines.extend(render_source_detail("Hetzner Local Agent", hetzner_local))

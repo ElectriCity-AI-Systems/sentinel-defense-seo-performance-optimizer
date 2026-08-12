@@ -1,0 +1,63 @@
+{
+  "execution_boundaries": {
+    "authorization_header_storage": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "high_activation": false,
+    "low_live_activation": false,
+    "medium_activation": false,
+    "nginx_change": false,
+    "phase_type": "reporting_state_resolution_source_precedence_diagnostic_validation",
+    "systemd_change": false,
+    "timer_change": false,
+    "tls_change": false,
+    "waf_rule_change": false,
+    "wordpress_write": false
+  },
+  "fail_closed": "CANONICAL_TRUTH_INCOMPLETE is reported, never a legacy substitution",
+  "identical_fields": [
+    "autonomy_level",
+    "runtime_stage",
+    "timer_active",
+    "emergency_stop",
+    "breach",
+    "owner_priority",
+    "website_status",
+    "total_5xx",
+    "nowplaying_504",
+    "low_live_enabled"
+  ],
+  "illegal_combinations": [
+    {
+      "header_runtime": "LEVEL_1_DRAFT_ONLY",
+      "pipeline_runtime": "LEVEL_2_MONITORING_ACTIVE"
+    },
+    {
+      "header_emergency_stop": true,
+      "runtime_emergency_stop": false
+    },
+    {
+      "header_timer": "not_installed",
+      "systemd_timer_active": true
+    },
+    {
+      "current_nowplaying_504": "> 0",
+      "header_nowplaying_504": 0
+    },
+    {
+      "current_source_map_404": 0,
+      "header_source_map_warning": "from stale report"
+    },
+    {
+      "owner_priority": "SEO",
+      "website_status": "WARNING or CRITICAL"
+    }
+  ],
+  "name": "sentinel-daily-summary-consistency",
+  "rule": "one operational fact = one canonical current value in every report section",
+  "schema_version": "sentinel-canonical-invariants-10.21",
+  "status": "PLAYBOOK_ACTIVE"
+}

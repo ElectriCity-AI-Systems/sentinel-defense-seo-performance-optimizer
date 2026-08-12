@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 import json
 
+import sentinel_canonical_truth as canonical_truth
+
 
 PROJECT_DIR = Path("/srv/sentinel-defense")
 
@@ -28,6 +30,8 @@ DEFAULT_MASTER_JSON = PROJECT_DIR / "reports/latest/sentinel-master-report.json"
 DEFAULT_WEBSITE_MD = PROJECT_DIR / "reports/latest/sentinel-defense-report.md"
 
 DEFAULT_SUBJECT = "Sentinel Daily Report"
+
+WP_USERS_ME_PATH = "/wp-json/wp/v2/users/me"
 
 ENV_KEYS = (
     "SENTINEL_MAIL_TO",
@@ -240,6 +244,50 @@ def as_status(value: Any) -> str:
     return redact_text(value if value is not None else "UNKNOWN")
 
 
+def load_canonical_truth() -> Dict[str, Any]:
+    """Phase 10.21: the canonical snapshot is the only source of current truth.
+
+    The mail timer runs independently of the production pipeline, so a stale
+    persisted snapshot is re-resolved in memory instead of being mailed as current.
+    """
+    return canonical_truth.load_or_resolve()
+
+
+def canonical_show(canonical: Dict[str, Any], field: str) -> str:
+    """Render one canonical value; unresolved fields stay UNKNOWN, never legacy."""
+    block = canonical.get(field)
+    if not isinstance(block, dict):
+        return "UNKNOWN"
+    return redact_text(canonical_truth.show(block))
+
+
+def build_subject(configured_subject: str, canonical_report: Dict[str, Any]) -> str:
+    """Subject badge comes from canonical truth, never from a second status source."""
+    subject = (configured_subject or DEFAULT_SUBJECT).strip()
+    subject = re.sub(r"^\[[^\]]*\]\s*", "", subject).strip() or DEFAULT_SUBJECT
+    canonical = canonical_report.get("canonical", {}) if isinstance(canonical_report, dict) else {}
+    if canonical_report.get("status") != "CANONICAL_TRUTH_OK":
+        badge = "CANONICAL_TRUTH_INCOMPLETE"
+    else:
+        badge = canonical_truth.show(canonical.get("overall_status", {}))
+    return f"[{badge}] {subject}"
+
+
+def build_legacy_section(canonical_report: Dict[str, Any]) -> List[str]:
+    """Section 16: historical modules stay listed, labelled and without effect."""
+    blocks = canonical_report.get("daily_summary_blocks", {}) if isinstance(canonical_report, dict) else {}
+    if blocks.get("legacy_section"):
+        return ["", "-----", ""] + list(blocks["legacy_section"])
+    return [
+        "",
+        "-----",
+        "",
+        "Legacy / Historical Modules",
+        "",
+        "- no canonical legacy supersession snapshot available",
+    ]
+
+
 def build_summary(master_json_path: Path) -> str:
     data = read_json_or_empty(master_json_path)
     recommendations = data.get("recommendations")
@@ -377,18 +425,45 @@ def build_summary(master_json_path: Path) -> str:
     if not isinstance(safe_sftp_lane, dict):
         safe_sftp_lane = {}
 
-    lines = [
-        "Sentinel Daily Summary",
+    canonical_report = load_canonical_truth()
+    canonical = canonical_report.get("canonical", {}) if isinstance(canonical_report, dict) else {}
+    blocks = canonical_report.get("daily_summary_blocks", {}) if isinstance(canonical_report, dict) else {}
+
+    # Phase 10.21: the executive header is the canonical header, verbatim. The
+    # mailer assembles no runtime, website or priority value of its own.
+    lines: List[str] = []
+    if blocks.get("header"):
+        lines.extend(blocks["header"])
+        lines.extend(["", f"Action Status: {as_status(data.get('action_status'))}"])
+    else:
+        lines.extend([
+            "Sentinel Daily Summary",
+            "",
+            f"Generated: {as_status(data.get('generated_at_utc'))}",
+            "",
+            "Canonical Truth:",
+            "CANONICAL_TRUTH_INCOMPLETE",
+            "",
+            "No canonical daily header is available; run sentinel_canonical_truth.py --resolve.",
+            "No legacy value is substituted for a missing current value.",
+        ])
+
+    if blocks.get("runtime_section"):
+        lines.extend(["", "-----", ""])
+        lines.extend(blocks["runtime_section"])
+    if blocks.get("website_section"):
+        lines.extend(["", "-----", ""])
+        lines.extend(blocks["website_section"])
+    if blocks.get("owner_priority_section"):
+        lines.extend(["", "-----", ""])
+        lines.extend(blocks["owner_priority_section"])
+
+    lines.extend([
         "",
-        f"Generated: {as_status(data.get('generated_at_utc'))}",
-        f"Overall Master Status: {as_status(data.get('overall_master_status'))}",
-        f"Action Status: {as_status(data.get('action_status'))}",
-        f"Website Status: {as_status(data.get('website_status'))}",
-        f"Website Correlation Status: {as_status(data.get('website_correlation_status'))}",
-        f"Local Status: {as_status(data.get('local_status'))}",
+        "-----",
         "",
         "Cloudflare Challenge Note:",
-    ]
+    ])
     if challenge_diagnosis.get("present"):
         verdict = challenge_diagnosis.get("verdict", "unknown")
         botfight_share = challenge_diagnosis.get("botfight_share_percent", "?")
@@ -403,9 +478,12 @@ def build_summary(master_json_path: Path) -> str:
     lines.extend([
         "",
         "SourceMap Prevention:",
+        f"- Current SourceMap 404 (24h): {canonical_show(canonical, 'source_map_404')}",
+        f"- Current SourceMap Status: {canonical_show(canonical, 'source_map_status')}",
+        "- Legacy SourceMap Diagnostic (below): stale informational, no operational effect.",
     ])
     if sourcemap:
-        lines.append(f"- Status: {as_status(sourcemap.get('status'))}")
+        lines.append(f"- Legacy status (superseded): {as_status(sourcemap.get('status'))}")
         lines.append(f"- Candidates: {as_status(sourcemap.get('candidate_count'))}")
         lines.append(
             "- Planned/Applied/Skipped: "
@@ -430,7 +508,14 @@ def build_summary(master_json_path: Path) -> str:
 
     lines.extend([
         "",
-        "AI-Radio Timeout Diagnosis:",
+        "AI-Radio / NowPlaying:",
+        f"- Current NowPlaying 504: {canonical_show(canonical, 'nowplaying_504')}",
+        f"- Recovery classification: {canonical_show(canonical, 'nowplaying_classification')}",
+        f"- Automatic local repair: {canonical_show(canonical, 'nowplaying_automatic_repair_allowed')}",
+        f"- Current {WP_USERS_ME_PATH} 504: {canonical_show(canonical, 'wp_users_me_504')}",
+        f"- {WP_USERS_ME_PATH} classification: {canonical_show(canonical, 'wp_users_me_classification')}",
+        "",
+        "Legacy AI-Radio Timeout Diagnosis (superseded, informational only):",
     ])
     if ai_radio:
         top = ai_radio.get("top_timeout_endpoint") if isinstance(ai_radio.get("top_timeout_endpoint"), dict) else {}
@@ -442,7 +527,9 @@ def build_summary(master_json_path: Path) -> str:
             f"{as_status(top.get('host'))}{as_status(top.get('path'))} "
             f"({as_status(top.get('count'))})"
         )
-        lines.append(f"- 24h NowPlaying 504 count: {as_status(ai_radio.get('nowplaying_504'))}")
+        lines.append(
+            f"- Legacy 24h NowPlaying 504 count (superseded): {as_status(ai_radio.get('nowplaying_504'))}"
+        )
         lines.append(f"- Remediation deployed: {as_status(remediation.get('microcache_deployed'))}")
         lines.append(f"- Local validation: {as_status(remediation.get('local_validation'))}")
         if remediation.get("microcache_deployed"):
@@ -460,7 +547,7 @@ def build_summary(master_json_path: Path) -> str:
 
     lines.extend([
         "",
-        "Autonomy Policy:",
+        "Legacy Autonomy Policy (superseded by canonical runtime):",
     ])
     if autonomy.get("present"):
         breach = " — POLICY BREACH, manual review" if autonomy.get("policy_breach") else ""
@@ -471,11 +558,15 @@ def build_summary(master_json_path: Path) -> str:
             else "HIGH allowed_now!"
         )
         lines.append(
-            f"- Autonomy: {as_status(autonomy.get('current_autonomy_level'))}, "
+            f"- Legacy autonomy level (superseded, operational_effect=false): "
+            f"{as_status(autonomy.get('current_autonomy_level'))}, "
             f"{policy_only_text}, {high_blocked_text}{breach}"
         )
+        lines.append(
+            f"- Canonical runtime level: {canonical_show(canonical, 'autonomy_level')}"
+        )
     else:
-        lines.append("- Autonomy: NOT_AVAILABLE (run sentinel_autonomy_policy.py)")
+        lines.append("- Legacy autonomy policy: NOT_AVAILABLE (historical module)")
     if seo.get("present"):
         lines.append(
             f"- SEO: {as_status(seo.get('highest_risk'))} risk drafts available, review-only"
@@ -504,7 +595,8 @@ def build_summary(master_json_path: Path) -> str:
         lines.append("- Approval Queue: NOT_AVAILABLE (run sentinel_owner_approval_queue.py)")
     if owner_daily.get("present"):
         lines.append(
-            f"- Owner Next Action: {as_status(owner_daily.get('recommended_next_owner_action'))}"
+            f"- Legacy Owner Next Action (superseded): "
+            f"{as_status(owner_daily.get('recommended_next_owner_action'))}"
         )
         lines.append(
             "- Autonomy Readiness: "
@@ -513,7 +605,7 @@ def build_summary(master_json_path: Path) -> str:
             f"blocked_high={as_status(owner_daily.get('blocked_high_risk_count'))}"
         )
     else:
-        lines.append("- Owner Next Action: NOT_AVAILABLE (run sentinel_owner_daily_action_summary.py)")
+        lines.append("- Legacy Owner Next Action (superseded): NOT_AVAILABLE (historical module)")
     if safe_apply_registry.get("present"):
         lines.append(
             "- Safe Apply Registry: "
@@ -595,22 +687,22 @@ def build_summary(master_json_path: Path) -> str:
         lines.append("- Draft Autonomy Verifier: NOT_AVAILABLE (run sentinel_safe_draft_autonomy_verifier.py)")
     if safe_draft_scheduler.get("present"):
         lines.append(
-            "- Draft Autonomy Scheduler Plan: "
+            "- Legacy Draft Autonomy Scheduler Plan (superseded): "
             f"status={as_status(safe_draft_scheduler.get('scheduler_status'))}, "
             f"timer={as_status(safe_draft_scheduler.get('timer_installation_status'))}, "
             f"breach={as_status(safe_draft_scheduler.get('scheduler_breach'))}"
         )
     else:
-        lines.append("- Draft Autonomy Scheduler Plan: NOT_AVAILABLE (run sentinel_safe_draft_autonomy_scheduler_plan.py)")
+        lines.append("- Legacy Draft Autonomy Scheduler Plan (superseded): NOT_AVAILABLE (historical module)")
     if safe_draft_timer.get("present"):
         lines.append(
-            "- Draft Autonomy Timer Draft: "
+            "- Legacy Draft Autonomy Timer Draft (superseded): "
             f"status={as_status(safe_draft_timer.get('timer_draft_status'))}, "
             f"installed={as_status(safe_draft_timer.get('timer_installation_status'))}, "
             f"breach={as_status(safe_draft_timer.get('timer_draft_breach'))}"
         )
     else:
-        lines.append("- Draft Autonomy Timer Draft: NOT_AVAILABLE (run sentinel_safe_draft_autonomy_timer_draft.py)")
+        lines.append("- Legacy Draft Autonomy Timer Draft (superseded): NOT_AVAILABLE (historical module)")
     if safe_draft_timer_review.get("present"):
         lines.append(
             "- Timer Install Review: "
@@ -846,7 +938,11 @@ def build_summary(master_json_path: Path) -> str:
     else:
         lines.append("- Safe SFTP SEO Apply: NOT_AVAILABLE (run sentinel_safe_sftp_seo_apply_lane.py dry-run)")
 
+    lines.extend(build_legacy_section(canonical_report))
+
     lines.extend([
+        "",
+        "-----",
         "",
         "Recommendations:",
     ])
@@ -894,11 +990,11 @@ def build_mail_body(master_md_path: Path, master_json_path: Path, website_md_pat
     return "\n".join(parts)
 
 
-def build_message(config: MailConfig, body: str) -> EmailMessage:
+def build_message(config: MailConfig, body: str, subject: Optional[str] = None) -> EmailMessage:
     message = EmailMessage()
     message["From"] = config.mail_from
     message["To"] = ", ".join(config.recipients)
-    message["Subject"] = config.subject
+    message["Subject"] = subject or config.subject
     message.set_content(body)
     return message
 
@@ -924,7 +1020,7 @@ def print_dry_run(config: MailConfig, missing: Iterable[str]) -> None:
     print(f"Port: {config.smtp_port if config.smtp_port is not None else '<fehlt/ungueltig>'}")
     print(f"STARTTLS: {'ja' if config.starttls else 'nein'}")
     print(f"Passwort vorhanden: {'ja' if bool(config.smtp_password) else 'nein'}")
-    print(f"Betreff: {config.subject}")
+    print(f"Betreff: {build_subject(config.subject, load_canonical_truth())}")
     missing_list = list(missing)
     if missing_list:
         print("Fehlende Pflichtwerte fuer --send: " + ", ".join(missing_list))
@@ -960,7 +1056,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     body = build_mail_body(args.master_md, args.master_json, args.website_md)
-    message = build_message(config, body)
+    subject = build_subject(config.subject, load_canonical_truth())
+    message = build_message(config, body, subject)
     try:
         send_mail(config, message)
     except Exception as exc:  # noqa: BLE001 - keep CLI failure concise and redacted.
