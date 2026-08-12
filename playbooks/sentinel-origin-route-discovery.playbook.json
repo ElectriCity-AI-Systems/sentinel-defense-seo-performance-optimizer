@@ -1,0 +1,74 @@
+{
+  "chain": [
+    "client",
+    "cloudflare_edge",
+    "cloudflare_dns_record",
+    "origin_host",
+    "reverse_proxy",
+    "upstream",
+    "application"
+  ],
+  "evidence_levels": [
+    "PROVEN",
+    "STRONG",
+    "SUGGESTIVE",
+    "INSUFFICIENT",
+    "CONTRADICTED"
+  ],
+  "execution_boundaries": {
+    "arbitrary_hosts": false,
+    "authorization_header_storage": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "free_shell": false,
+    "load_balancer_change": false,
+    "nginx_change": false,
+    "origin_migration": false,
+    "phase_type": "read_only_route_discovery",
+    "proxy_status_change": false,
+    "response_body_storage": false,
+    "ruleset_change": false,
+    "systemd_change": false,
+    "tls_change": false,
+    "waf_change": false,
+    "wordpress_write": false
+  },
+  "forbidden": [
+    "dns change",
+    "proxy status change",
+    "ruleset change",
+    "ssl mode change",
+    "origin rules change",
+    "load balancer change",
+    "arbitrary hosts",
+    "arbitrary urls",
+    "credential output",
+    "response body storage"
+  ],
+  "name": "sentinel-origin-route-discovery",
+  "principle": "evidence first; a route is only known when authoritative records prove it",
+  "schema_version": "sentinel-origin-route-mapper-10.22",
+  "scope": {
+    "cloudflare_api_paths": [
+      "/zones/{zone_id}",
+      "/zones/{zone_id}/dns_records"
+    ],
+    "cloudflare_methods": [
+      "GET"
+    ],
+    "endpoints": [
+      "/api/nowplaying/electri-city-ai-electro-radio",
+      "/api/time",
+      "/wp-json/wp/v2/users/me",
+      "/",
+      "/wp-login.php",
+      "/page/2/",
+      "/wp-admin/images/w-logo-gray.png"
+    ],
+    "zone": "electri-c-ity-studios-24-7.com"
+  },
+  "status": "PLAYBOOK_ACTIVE"
+}

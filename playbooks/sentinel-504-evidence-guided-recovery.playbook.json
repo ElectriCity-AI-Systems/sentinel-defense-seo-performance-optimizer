@@ -1,0 +1,55 @@
+{
+  "execution_boundaries": {
+    "arbitrary_hosts": false,
+    "authenticated_endpoint_caching": false,
+    "authorization_header_storage": false,
+    "blind_timeout_increase": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "free_shell": false,
+    "global_nginx_change": false,
+    "load_balancer_change": false,
+    "nginx_change": false,
+    "origin_migration": false,
+    "phase_type": "evidence_guided_recovery",
+    "php_fpm_change": false,
+    "plugin_or_theme_change": false,
+    "proxy_status_change": false,
+    "response_body_storage": false,
+    "ruleset_change": false,
+    "systemd_change": false,
+    "tls_change": false,
+    "waf_change": false,
+    "wordpress_write": false
+  },
+  "gate": [
+    "causality evidence=PROVEN",
+    "repairability=SAFE",
+    "repair_class in [R1,R2,R3,R4]",
+    "rollback_ready=true",
+    "scope_exact=true"
+  ],
+  "name": "sentinel-504-evidence-guided-recovery",
+  "principle": "evidence first, repair second, measurement third, rollback always",
+  "schema_version": "sentinel-504-recovery-10.22",
+  "sequence": [
+    "collect-baseline",
+    "classify",
+    "build-failure-graph",
+    "build-repairability",
+    "prepare-repair",
+    "validate-repair",
+    "apply-approved-repair",
+    "validate-post-apply",
+    "evaluate-effect"
+  ],
+  "status": "PLAYBOOK_ACTIVE",
+  "valid_outcomes": [
+    "SAFE_REPAIR_APPLIED",
+    "NO_SAFE_AUTOMATIC_REPAIR",
+    "CAUSE_EVIDENCE_INSUFFICIENT"
+  ]
+}

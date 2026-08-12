@@ -1,0 +1,52 @@
+{
+  "execution_boundaries": {
+    "arbitrary_hosts": false,
+    "authenticated_endpoint_caching": false,
+    "authorization_header_storage": false,
+    "blind_timeout_increase": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "free_shell": false,
+    "global_nginx_change": false,
+    "load_balancer_change": false,
+    "nginx_change": false,
+    "origin_migration": false,
+    "phase_type": "evidence_guided_recovery",
+    "php_fpm_change": false,
+    "plugin_or_theme_change": false,
+    "proxy_status_change": false,
+    "response_body_storage": false,
+    "ruleset_change": false,
+    "systemd_change": false,
+    "tls_change": false,
+    "waf_change": false,
+    "wordpress_write": false
+  },
+  "false_success_guards": [
+    "traffic_disappeared",
+    "monitor_stale",
+    "error_migration",
+    "endpoint_unreachable"
+  ],
+  "name": "sentinel-504-effect-validation",
+  "principle": "evidence first, repair second, measurement third, rollback always",
+  "rule": "the 24h counter alone never proves success or failure",
+  "schema_version": "sentinel-504-recovery-10.22",
+  "status": "PLAYBOOK_ACTIVE",
+  "success_levels": [
+    "immediate_green",
+    "short_term_green",
+    "strong_green",
+    "24h_confirmed"
+  ],
+  "windows": [
+    "T+0",
+    "T+15s",
+    "T+60s",
+    "T+3m",
+    "T+15m"
+  ]
+}

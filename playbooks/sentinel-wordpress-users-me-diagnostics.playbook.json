@@ -1,0 +1,61 @@
+{
+  "classes": [
+    "WP_USERS_ME_EXPECTED_ADMIN_TRAFFIC",
+    "WP_USERS_ME_FRONTEND_DEPENDENCY",
+    "WP_USERS_ME_PLUGIN_POLLING",
+    "WP_USERS_ME_BOT_OR_SCANNER",
+    "WP_USERS_ME_AUTHENTICATED_TIMEOUT",
+    "WP_USERS_ME_ANONYMOUS_TIMEOUT",
+    "WP_USERS_ME_ORIGIN_TIMEOUT",
+    "WP_USERS_ME_REQUEST_STORM",
+    "WP_USERS_ME_EVIDENCE_INSUFFICIENT"
+  ],
+  "endpoint": "/wp-json/wp/v2/users/me",
+  "execution_boundaries": {
+    "arbitrary_hosts": false,
+    "authenticated_endpoint_caching": false,
+    "authorization_header_storage": false,
+    "blind_timeout_increase": false,
+    "cloudflare_write": false,
+    "cookie_storage": false,
+    "credential_output": false,
+    "database_change": false,
+    "dns_change": false,
+    "free_shell": false,
+    "global_nginx_change": false,
+    "load_balancer_change": false,
+    "nginx_change": false,
+    "origin_migration": false,
+    "phase_type": "evidence_guided_recovery",
+    "php_fpm_change": false,
+    "plugin_or_theme_change": false,
+    "proxy_status_change": false,
+    "response_body_storage": false,
+    "ruleset_change": false,
+    "systemd_change": false,
+    "tls_change": false,
+    "waf_change": false,
+    "wordpress_write": false
+  },
+  "forbidden": [
+    "caching",
+    "public response storage",
+    "auth bypass",
+    "ignoring cookies",
+    "REST permission change",
+    "WordPress code change",
+    "challenge rule",
+    "block rule"
+  ],
+  "name": "sentinel-wordpress-users-me-diagnostics",
+  "never_stored": [
+    "cookies",
+    "authorization headers",
+    "tokens",
+    "session ids",
+    "user ids"
+  ],
+  "principle": "evidence first, repair second, measurement third, rollback always",
+  "schema_version": "sentinel-504-recovery-10.22",
+  "status": "PLAYBOOK_ACTIVE"
+}

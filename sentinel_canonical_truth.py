@@ -334,6 +334,15 @@ SOURCE_LIST: Tuple[Source, ...] = (
         "primary",
         "Origin failure diagnostics (503/504/522/526 correlation, TLS diagnostic).",
     ),
+    # Tier 5 — current origin diagnostics
+    Source(
+        "origin_route_map",
+        REPORT_DIR / "sentinel-origin-route-map.json",
+        CLASS_ORIGIN,
+        KIND_STATE_OF_RECORD,
+        "route_map",
+        "Origin route map from authoritative Cloudflare DNS plus edge and origin probes.",
+    ),
     # Tier 6 — current recovery modules
     Source(
         "nowplaying_recovery",
@@ -342,6 +351,14 @@ SOURCE_LIST: Tuple[Source, ...] = (
         KIND_STATE_OF_RECORD,
         "primary",
         "NowPlaying recovery classification (route mismatch, repair permission).",
+    ),
+    Source(
+        "origin_504_recovery",
+        REPORT_DIR / "sentinel-504-recovery.json",
+        CLASS_RECOVERY,
+        KIND_ROLLING_METRIC,
+        "origin_504_recovery",
+        "Evidence-guided 504 recovery: dominant endpoint, repairability and repair gate.",
     ),
     # Tier 7 — current consistency evaluation
     Source(
@@ -953,6 +970,18 @@ DIAGNOSTIC_FIELDS: Dict[str, List[Candidate]] = {
         cand("nowplaying_recovery", "repair_applied", allow_stale=True),
     ],
     "consistency_status": [cand("consistency", "status")],
+    # Phase 10.22 — evidence-guided origin recovery
+    "origin_recovery_status": [cand("origin_504_recovery", "status")],
+    "dominant_504_endpoint": [cand("origin_504_recovery", "dominant_504_endpoint")],
+    "dominant_504_origin": [cand("origin_504_recovery", "dominant_504_origin")],
+    "dominant_504_share_percent": [cand("origin_504_recovery", "dominant_504_share_percent")],
+    "origin_504_repairability": [cand("origin_504_recovery", "repair_gate.status")],
+    "primary_failure_focus": [
+        cand("origin_504_recovery", "primary_failure_focus.primary_failure_focus"),
+    ],
+    "origin_route_map_status": [cand("origin_route_map", "status", allow_stale=True)],
+    "last_origin_repair": [cand("origin_504_recovery", "repair_gate.selected_endpoint")],
+    "last_origin_repair_effect": [cand("origin_504_recovery", "effect.status")],
 }
 
 FIELD_OWNERSHIP: Dict[str, List[Candidate]] = {
@@ -1575,6 +1604,15 @@ def assemble_canonical(
         "nowplaying_automatic_repair_allowed": provenance(fields, "nowplaying_automatic_repair_allowed"),
         "nowplaying_repair_applied": provenance(fields, "nowplaying_repair_applied"),
         "consistency_status": provenance(fields, "consistency_status"),
+        "origin_recovery_status": provenance(fields, "origin_recovery_status"),
+        "origin_route_map_status": provenance(fields, "origin_route_map_status"),
+        "dominant_504_endpoint": provenance(fields, "dominant_504_endpoint"),
+        "dominant_504_origin": provenance(fields, "dominant_504_origin"),
+        "dominant_504_share_percent": provenance(fields, "dominant_504_share_percent"),
+        "origin_504_repairability": provenance(fields, "origin_504_repairability"),
+        "primary_failure_focus": provenance(fields, "primary_failure_focus"),
+        "last_origin_repair": provenance(fields, "last_origin_repair"),
+        "last_origin_repair_effect": provenance(fields, "last_origin_repair_effect"),
     }
 
 
@@ -1853,12 +1891,21 @@ def build_daily_summary_blocks(report: Dict[str, Any]) -> Dict[str, Any]:
     priority_section = [
         "Owner Priority",
         "",
-        f"Selected: {show(canonical['owner_priority'])}",
-        f"Rank: {canonical['owner_priority'].get('rank')}",
-        f"Reason: {canonical['owner_priority'].get('rank_reason')}",
-        f"Suppressed: {', '.join(canonical['owner_priority'].get('suppressed_lower_priorities', [])) or 'none'}",
+        f"Selected: {show(c('owner_priority'))}",
+        f"Rank: {c('owner_priority').get('rank')}",
+        f"Reason: {c('owner_priority').get('rank_reason')}",
+        f"Suppressed: {', '.join(c('owner_priority').get('suppressed_lower_priorities', [])) or 'none'}",
         f"Legacy SEO checklist may lead: "
-        f"{str(canonical['owner_priority'].get('legacy_seo_checklist_allowed')).lower()}",
+        f"{str(c('owner_priority').get('legacy_seo_checklist_allowed')).lower()}",
+        "",
+        "Primary Failure Focus:",
+        show(c("primary_failure_focus")),
+        "",
+        f"Dominant 504 endpoint: {show(c('dominant_504_endpoint'))} "
+        f"({show(c('dominant_504_share_percent'))}% of current 504)",
+        f"Dominant 504 origin: {show(c('dominant_504_origin'))}",
+        f"Origin recovery: {show(c('origin_recovery_status'))}",
+        f"504 repairability: {show(c('origin_504_repairability'))}",
     ]
 
     return {

@@ -84,6 +84,30 @@
         "source_class": "CURRENT_WEBSITE_EVIDENCE"
       }
     ],
+    "dominant_504_endpoint": [
+      {
+        "allow_stale_informational": false,
+        "expression": "dominant_504_endpoint",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "dominant_504_origin": [
+      {
+        "allow_stale_informational": false,
+        "expression": "dominant_504_origin",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "dominant_504_share_percent": [
+      {
+        "allow_stale_informational": false,
+        "expression": "dominant_504_share_percent",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
     "emergency_stop": [
       {
         "allow_stale_informational": false,
@@ -192,6 +216,22 @@
         "source_class": "CURRENT_RUNTIME"
       }
     ],
+    "last_origin_repair": [
+      {
+        "allow_stale_informational": false,
+        "expression": "repair_gate.selected_endpoint",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "last_origin_repair_effect": [
+      {
+        "allow_stale_informational": false,
+        "expression": "effect.status",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
     "local_status": [
       {
         "allow_stale_informational": false,
@@ -286,11 +326,35 @@
         "source_class": "CURRENT_RECOVERY_MODULE"
       }
     ],
+    "origin_504_repairability": [
+      {
+        "allow_stale_informational": false,
+        "expression": "repair_gate.status",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
     "origin_diagnostic_status": [
       {
         "allow_stale_informational": false,
         "expression": "status",
         "source": "reports/latest/sentinel-origin-failure-diagnostics.json",
+        "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
+      }
+    ],
+    "origin_recovery_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "status",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
+      }
+    ],
+    "origin_route_map_status": [
+      {
+        "allow_stale_informational": true,
+        "expression": "status",
+        "source": "reports/latest/sentinel-origin-route-map.json",
         "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
       }
     ],
@@ -300,6 +364,14 @@
         "expression": "origin_tls_diagnostic.status",
         "source": "reports/latest/sentinel-origin-failure-diagnostics.json",
         "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
+      }
+    ],
+    "primary_failure_focus": [
+      {
+        "allow_stale_informational": false,
+        "expression": "primary_failure_focus.primary_failure_focus",
+        "source": "reports/latest/sentinel-504-recovery.json",
+        "source_class": "CURRENT_RECOVERY_MODULE"
       }
     ],
     "production_apply_lock": [
