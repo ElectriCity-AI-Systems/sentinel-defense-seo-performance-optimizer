@@ -961,6 +961,9 @@ DIAGNOSTIC_FIELDS: Dict[str, List[Candidate]] = {
         cand("origin_diagnostics", "wp_users_me_diagnostic.classification"),
     ],
     "nowplaying_classification": [
+        # Phase 10.22 evidence-guided recovery is authoritative when available.
+        # The older Phase 10.20 NowPlaying recovery remains a legacy fallback only.
+        cand("origin_504_recovery", "nowplaying_chain.failure_class"),
         cand("nowplaying_recovery", "classification.classification", allow_stale=True),
     ],
     "nowplaying_automatic_repair_allowed": [
@@ -974,6 +977,9 @@ DIAGNOSTIC_FIELDS: Dict[str, List[Candidate]] = {
     "origin_recovery_status": [cand("origin_504_recovery", "status")],
     "dominant_504_endpoint": [cand("origin_504_recovery", "dominant_504_endpoint")],
     "dominant_504_origin": [cand("origin_504_recovery", "dominant_504_origin")],
+    # The recovery report identifies the dominant endpoint, but its percentage
+    # belongs to that report's older baseline snapshot. The live percentage is
+    # derived later from current website evidence.
     "dominant_504_share_percent": [cand("origin_504_recovery", "dominant_504_share_percent")],
     "origin_504_repairability": [cand("origin_504_recovery", "repair_gate.status")],
     "primary_failure_focus": [
@@ -1553,6 +1559,33 @@ def assemble_canonical(
     overall = derive_overall_status(fields)
     runtime_status = derive_runtime_status(fields)
     source_map_status = derive_source_map_status(fields)
+
+    # Phase 10.22.1:
+    # Recovery modules determine WHICH endpoint/origin is dominant, while the
+    # share is always recalculated from the newest canonical website snapshot.
+    current_nowplaying_504 = fields.get("nowplaying_504", {}).get("value")
+    current_http_504 = fields.get("http_504", {}).get("value")
+    current_dominant_504_endpoint = fields.get("dominant_504_endpoint", {}).get("value")
+
+    if (
+        current_dominant_504_endpoint == NOWPLAYING_PATH
+        and isinstance(current_nowplaying_504, (int, float))
+        and isinstance(current_http_504, (int, float))
+        and current_http_504 > 0
+    ):
+        live_dominant_504_share = {
+            **derived_provenance(
+                round((current_nowplaying_504 / current_http_504) * 100, 2),
+                ["dominant_504_endpoint", "nowplaying_504", "http_504"],
+                "Live dominant 504 share recalculated from the current website snapshot.",
+            ),
+            "generated_at": generated_at,
+        }
+    else:
+        # Until a generic current-path counter is available, keep the recovery
+        # module's own share when the dominant endpoint is not NowPlaying.
+        live_dominant_504_share = provenance(fields, "dominant_504_share_percent")
+
     return {
         "generated_at": derived_provenance(
             generated_at, [], "Snapshot creation time of this canonical resolution."
@@ -1608,7 +1641,7 @@ def assemble_canonical(
         "origin_route_map_status": provenance(fields, "origin_route_map_status"),
         "dominant_504_endpoint": provenance(fields, "dominant_504_endpoint"),
         "dominant_504_origin": provenance(fields, "dominant_504_origin"),
-        "dominant_504_share_percent": provenance(fields, "dominant_504_share_percent"),
+        "dominant_504_share_percent": live_dominant_504_share,
         "origin_504_repairability": provenance(fields, "origin_504_repairability"),
         "primary_failure_focus": provenance(fields, "primary_failure_focus"),
         "last_origin_repair": provenance(fields, "last_origin_repair"),
@@ -2525,6 +2558,132 @@ def run_self_test() -> Dict[str, Any]:
         for entry in legacy["field_claims"]
     )
     checks["test_d_wp_users_me"] = value_of(fields, "wp_users_me_504") == 62
+
+    # Test D2 — Phase 10.22 recovery evidence supersedes the older route-mismatch
+    # classification, and the live NowPlaying share is recalculated from the
+    # newest website snapshot instead of the recovery module's older baseline.
+    recovery_website_payload = {
+        "generated_at_utc": "2026-08-13T09:53:51Z",
+        "overall_status": "CRITICAL",
+        "metrics": [
+            {"key": "total_5xx", "value": 728},
+            {"key": "map_404", "value": 0},
+        ],
+        "rolling_window_context": {"status": "RECENT_SIGNIFICANT_GROWTH"},
+        "origin_pressure_breakdown": {
+            "top_5xx_status_codes": [
+                {"status": 504, "count": 581},
+                {"status": 503, "count": 144},
+                {"status": 526, "count": 1},
+            ],
+            "top_5xx_paths": [
+                {
+                    "path": NOWPLAYING_PATH,
+                    "count": 374,
+                    "statuses": [{"status": 504, "count": 374}],
+                },
+                {
+                    "path": WP_USERS_ME_PATH,
+                    "count": 53,
+                    "statuses": [{"status": 504, "count": 53}],
+                },
+            ],
+        },
+    }
+
+    loaded_recovery = _synthetic_sources(
+        website=recovery_website_payload,
+        origin_504_recovery={
+            "generated_at_utc": "2026-08-12T16:12:51Z",
+            "status": "ORIGIN_RECOVERY_OWNER_ACTION_REQUIRED",
+            "dominant_504_endpoint": NOWPLAYING_PATH,
+            "dominant_504_count": 370,
+            "dominant_504_share_percent": 59.2,
+            "dominant_504_origin": "204.168.173.77",
+            "nowplaying_chain": {
+                "failure_class": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
+                "failure_evidence_level": "INSUFFICIENT",
+                "origin_target": "204.168.173.77",
+                "repairability": "REMOTE_OWNER_ACTION_REQUIRED",
+            },
+            "repair_gate": {"status": "NO_SAFE_AUTOMATIC_REPAIR"},
+            "primary_failure_focus": {
+                "primary_failure_focus": "AI_RADIO_NOWPLAYING_RECOVERY"
+            },
+        },
+        nowplaying_recovery={
+            "generated_at_utc": "2026-08-01T15:02:10Z",
+            "classification": {
+                "classification": "NOWPLAYING_ROUTE_MISMATCH",
+                "automatic_repair_allowed": False,
+            },
+            "repair_applied": False,
+            "status": "NOWPLAYING_ROUTE_MISMATCH",
+        },
+    )
+
+    recovery_fields = resolve_fields(loaded_recovery)
+    recovery_canonical = assemble_canonical(
+        recovery_fields,
+        "2026-08-13T10:00:00Z",
+    )
+
+    checks["test_d2_recovery_classification_precedence"] = (
+        value_of(recovery_fields, "nowplaying_classification")
+        == "NOWPLAYING_EVIDENCE_INSUFFICIENT"
+    )
+    checks["test_d2_old_route_mismatch_not_selected"] = (
+        value_of(recovery_fields, "nowplaying_classification")
+        != "NOWPLAYING_ROUTE_MISMATCH"
+    )
+    checks["test_d2_live_share_recalculated"] = (
+        recovery_canonical["dominant_504_share_percent"]["value"] == 64.37
+    )
+    checks["test_d2_old_recovery_share_not_live"] = (
+        recovery_canonical["dominant_504_share_percent"]["value"] != 59.2
+    )
+    checks["test_d2_live_share_provenance"] = (
+        recovery_canonical["dominant_504_share_percent"]["source_class"]
+        == "CANONICAL_DERIVATION"
+        and recovery_canonical["dominant_504_share_percent"]["generated_at"]
+        == "2026-08-13T10:00:00Z"
+        and recovery_canonical["dominant_504_share_percent"]["derived_from"]
+        == ["dominant_504_endpoint", "nowplaying_504", "http_504"]
+    )
+
+    # Guard against silently treating NowPlaying as dominant forever.
+    # If the recovery module selects another endpoint, retain its own share
+    # until a generic current-path-count resolver exists.
+    loaded_other_dominant = _synthetic_sources(
+        website=recovery_website_payload,
+        origin_504_recovery={
+            "generated_at_utc": "2026-08-12T16:12:51Z",
+            "status": "ORIGIN_RECOVERY_OWNER_ACTION_REQUIRED",
+            "dominant_504_endpoint": "/api/time",
+            "dominant_504_count": 57,
+            "dominant_504_share_percent": 9.81,
+            "dominant_504_origin": "204.168.173.77",
+            "nowplaying_chain": {
+                "failure_class": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
+            },
+            "repair_gate": {"status": "NO_SAFE_AUTOMATIC_REPAIR"},
+            "primary_failure_focus": {
+                "primary_failure_focus": "WEBSITE_ORIGIN_STABILITY"
+            },
+        },
+    )
+
+    other_fields = resolve_fields(loaded_other_dominant)
+    other_canonical = assemble_canonical(
+        other_fields,
+        "2026-08-13T10:00:00Z",
+    )
+
+    checks["test_d2_non_nowplaying_dominant_guard"] = (
+        other_canonical["dominant_504_share_percent"]["value"] == 9.81
+        and other_canonical["dominant_504_share_percent"]["source_class"]
+        == "CURRENT_RECOVERY_MODULE"
+    )
 
     # Test E — SourceMap conflict: legacy warning/70 vs current 0.
     loaded = _synthetic_sources(
