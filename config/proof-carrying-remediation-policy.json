@@ -1,0 +1,172 @@
+{
+  "schema_version": "sentinel-proof-carrying-remediation-policy-1",
+  "policy_version": 1,
+  "mode": "ENFORCEMENT_GATE_ONLY",
+  "proof_gate_required": true,
+  "independent_verifier_required": true,
+  "activation_effect": false,
+  "automatic_policy_expansion": false,
+  "cause_proof_required": true,
+  "proof_ttl_seconds": 120,
+  "owner_policy_reference": "phase-10.19-owner-approval-2026-07-16",
+  "evidence_max_age_seconds": {
+    "website_report": 900,
+    "origin_diagnostics": 1800,
+    "health_baseline": 600,
+    "tls_gate": 1800,
+    "write_canary": 86400,
+    "runtime_state": 600,
+    "circuit_breaker": 600,
+    "origin_evidence": 1800
+  },
+  "change_budget": {
+    "max_active_actions": 1,
+    "max_actions_per_hour": 1,
+    "max_failed_actions_per_hour": 1,
+    "max_failed_rollbacks": 0,
+    "maximum_ttl_minutes": 10,
+    "rollback_timeout_seconds": 30,
+    "global_cooldown_minutes": 30
+  },
+  "global_invariants": [
+    "breach_false",
+    "medium_live_disabled",
+    "high_live_disabled",
+    "unrestricted_shell_disabled",
+    "runtime_stage_guarded",
+    "cloudflare_write_canary_ok",
+    "health_gate_green",
+    "tls_gate_green",
+    "circuit_breaker_closed",
+    "policy_hash_current",
+    "registry_hash_current",
+    "rollback_artifact_required",
+    "post_validation_required"
+  ],
+  "blocked_action_classes": [
+    "wordpress_core_change",
+    "plugin_or_theme_change",
+    "database_write",
+    "dns_change",
+    "cloudflare_ssl_mode_change",
+    "certificate_replacement",
+    "origin_ip_change",
+    "nginx_configuration_change",
+    "broad_htaccess_change",
+    "country_asn_or_browser_block",
+    "credential_change",
+    "git_or_marketplace_publish"
+  ],
+  "contracts": [
+    {
+      "action_id": "temporary_scanner_managed_challenge_v1",
+      "action_version": 1,
+      "enabled": true,
+      "risk": "LOW_LIVE",
+      "requires_existing_runtime_authorization": true,
+      "scope": {
+        "type": "cloudflare_custom_rule",
+        "action": "managed_challenge",
+        "canary_expression": "(http.request.uri.path eq \"/.env\")",
+        "full_expression": "((http.request.uri.path eq \"/.env\") or (starts_with(http.request.uri.path, \"/.env.\")) or (http.request.uri.path eq \"/wp-config.php.bak\") or (http.request.uri.path eq \"/wp-config.old\") or (starts_with(http.request.uri.path, \"/alfacgiapi/\")) or (starts_with(http.request.uri.path, \"/.git/\")) or (starts_with(http.request.uri.path, \"/vendor/phpunit/\")) or (http.request.uri.path eq \"/phpinfo.php\"))",
+        "sentinel_owned_ref": "sentinel_guarded_scanner_challenge_v1"
+      },
+      "allowed_exact_paths": [
+        "/.env",
+        "/wp-config.php.bak",
+        "/wp-config.old",
+        "/phpinfo.php"
+      ],
+      "allowed_path_prefixes": [
+        "/.env.",
+        "/alfacgiapi/",
+        "/.git/",
+        "/vendor/phpunit/"
+      ],
+      "trigger_requirements": {
+        "minimum_requests": 100,
+        "minimum_actor_groups": 2,
+        "maximum_window_minutes": 5,
+        "fresh_exact_path_evidence": true,
+        "all_observed_paths_allowlisted": true,
+        "legitimate_use_absent": true
+      },
+      "required_evidence": [
+        "website_report",
+        "origin_diagnostics",
+        "health_baseline",
+        "tls_gate",
+        "write_canary",
+        "runtime_state",
+        "circuit_breaker"
+      ],
+      "canary": {
+        "required": true,
+        "scope": "single_exact_scanner_path",
+        "maximum_ttl_minutes": 5
+      },
+      "maximum_ttl_minutes": 10,
+      "rollback_contract": "rollback_sentinel_owned_rule_v1",
+      "health_profile": "scanner_challenge_profile",
+      "permitted_effects": [
+        "temporary_managed_challenge",
+        "sentinel_owned_rule_create",
+        "sentinel_owned_rule_delete"
+      ],
+      "forbidden_effects": [
+        "block_action",
+        "country_rule",
+        "asn_rule",
+        "browser_rule",
+        "root_path_rule",
+        "wordpress_change",
+        "dns_change",
+        "ssl_change"
+      ]
+    },
+    {
+      "action_id": "rollback_sentinel_owned_rule_v1",
+      "action_version": 1,
+      "enabled": true,
+      "risk": "LOW_LIVE",
+      "safety_recovery_action": true,
+      "requires_existing_runtime_authorization": true,
+      "scope": {
+        "type": "sentinel_owned_rule_only"
+      },
+      "required_evidence": [
+        "runtime_state",
+        "circuit_breaker"
+      ],
+      "canary": {
+        "required": true,
+        "scope": "restore_snapshot_and_validate",
+        "maximum_ttl_minutes": 5
+      },
+      "maximum_ttl_minutes": 10,
+      "health_profile": "sentinel_rule_rollback_profile",
+      "permitted_effects": [
+        "restore_before_hash",
+        "delete_sentinel_owned_rule"
+      ],
+      "forbidden_effects": [
+        "foreign_rule_change",
+        "scope_expansion",
+        "dns_change",
+        "ssl_change"
+      ]
+    }
+  ],
+  "safety": {
+    "network_access": false,
+    "credential_access": false,
+    "shell_execution": false,
+    "live_apply": false,
+    "remote_write": false,
+    "medium_executable": false,
+    "high_executable": false,
+    "breach": false,
+    "autonomous_waf_execution": false,
+    "source_self_modification": false
+  }
+}

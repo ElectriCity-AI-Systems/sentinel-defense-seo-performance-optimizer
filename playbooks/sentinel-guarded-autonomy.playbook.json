@@ -1,12 +1,15 @@
 {
   "activation_gate": "all_required_gates_must_pass",
-  "allowed_risk": "LOW_LIVE",
-  "autonomy_level": "LEVEL_2_GUARDED_AUTONOMY",
+  "allowed_risk": "MONITORING_AND_LOCAL_DERIVED_STATE_REPAIR",
+  "autonomy_level": "LEVEL_2_MONITORING_ACTIVE",
   "blocked_risks": [
     "MEDIUM",
     "HIGH"
   ],
   "breach": false,
+  "autonomous_external_mutation": false,
+  "autonomous_waf": false,
+  "source_self_modification": false,
   "name": "sentinel-guarded-autonomy",
   "owner_policy_reference": "phase-10.17-owner-approval-2026-07-15",
   "states": [

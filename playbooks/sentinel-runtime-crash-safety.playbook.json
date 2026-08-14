@@ -1,0 +1,12 @@
+{
+  "schema_version": "sentinel-playbook-1",
+  "playbook_id": "sentinel-runtime-crash-safety",
+  "mode": "FAIL_CLOSED_TRANSACTION_JOURNAL",
+  "persistence": "atomic_replace_fsync",
+  "pre_apply_recovery": "abort_without_productive_write",
+  "uncertain_apply_recovery": "read_only_reconcile_then_exact_rollback",
+  "unexplained_remote_state": "emergency_stop_and_breach",
+  "rollback_identity": "fixed_sentinel_owned_artifact_only",
+  "parallel_cycles": false,
+  "source_modification": false
+}

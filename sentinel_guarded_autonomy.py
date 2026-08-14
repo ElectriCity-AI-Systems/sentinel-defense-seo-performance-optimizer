@@ -31,7 +31,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+import sentinel_independent_remediation_verifier as remediation_verifier
 import sentinel_monitoring_decision_engine as monitoring_decision
+import sentinel_proof_carrying_remediation as proof_remediation
+import sentinel_runtime_safety as runtime_safety
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -155,14 +158,17 @@ POLICY_TEMPLATE: Dict[str, Any] = {
     "action_limits": {
         "canary_max_actions_per_hour": 1,
         "global_cooldown_minutes": 30,
-        "max_actions_per_day": 12,
-        "max_actions_per_hour": 3,
-        "max_failed_actions_per_hour": 2,
-        "max_identical_action_retries": 1,
+        "max_actions_per_day": 4,
+        "max_actions_per_hour": 1,
+        "max_failed_actions_per_hour": 1,
+        "max_failed_rollbacks": 0,
+        "max_identical_action_retries": 0,
     },
     "activation_requires_all_gates": True,
     "automatic_emergency_stop": True,
-    "autonomy_level": "LEVEL_2_GUARDED_AUTONOMY",
+    "autonomy_level": "LEVEL_2_MONITORING_ACTIVE",
+    "autonomous_external_mutation_enabled": False,
+    "autonomous_waf_enabled": False,
     "canary_required": True,
     "default_ttl_minutes": 30,
     "health_targets": [
@@ -185,7 +191,7 @@ POLICY_TEMPLATE: Dict[str, Any] = {
     ],
     "health_challenge_repetitions": 3,
     "high_live_enabled": False,
-    "low_live_enabled": True,
+    "low_live_enabled": False,
     "maximum_ttl_minutes": 240,
     "medium_live_enabled": False,
     "monitoring_enabled": True,
@@ -194,6 +200,7 @@ POLICY_TEMPLATE: Dict[str, Any] = {
     "policy_version": 3,
     "post_apply_validation_required": True,
     "rollback_required": True,
+    "source_self_modification_enabled": False,
     "two_phase_commit_required": True,
     "validation_schedule_seconds": [0, 30, 120, 300],
 }
@@ -213,6 +220,23 @@ SCANNER_FULL_EXPRESSION = (
     '(starts_with(http.request.uri.path, "/vendor/phpunit/")) or '
     '(http.request.uri.path eq "/phpinfo.php"))'
 )
+
+SCANNER_EXACT_PATHS = {
+    "/.env",
+    "/wp-config.php.bak",
+    "/wp-config.old",
+    "/phpinfo.php",
+}
+SCANNER_PATH_PREFIXES = (
+    "/.env.",
+    "/alfacgiapi/",
+    "/.git/",
+    "/vendor/phpunit/",
+)
+
+
+def scanner_path_allowlisted(path: str) -> bool:
+    return path in SCANNER_EXACT_PATHS or any(path.startswith(prefix) for prefix in SCANNER_PATH_PREFIXES)
 
 
 def write_canary_payload() -> Dict[str, Any]:
@@ -247,7 +271,8 @@ REGISTERED_ACTIONS: List[Dict[str, Any]] = [
         "action_id": "temporary_scanner_managed_challenge_v1",
         "action_version": 1,
         "risk": "LOW_LIVE",
-        "enabled": True,
+        "enabled": False,
+        "disabled_reason": "Owner production boundary prohibits autonomous WAF mutation.",
         "scope": {
             "type": "cloudflare_custom_rule",
             "action": "managed_challenge",
@@ -340,7 +365,9 @@ REGISTERED_ACTIONS: List[Dict[str, Any]] = [
         "action_id": "rollback_sentinel_owned_rule_v1",
         "action_version": 1,
         "risk": "LOW_LIVE",
-        "enabled": True,
+        "enabled": False,
+        "disabled_reason": "Safety rollback remains available only for reconciliation of a previously persisted Sentinel-owned action.",
+        "safety_recovery_only": True,
         "scope": {"type": "sentinel_owned_rule_only"},
         "trigger": {"validation_failure": True},
         "negative_conditions": ["rollback_artifact_missing", "current_hash_mismatch"],
@@ -557,9 +584,8 @@ def write_text(path: Path, text: str) -> None:
         raise RuntimeError(f"write path blocked: {path}")
     if PRIVATE_KEY_RE.search(text):
         raise RuntimeError("private key content blocked")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text.rstrip() + "\n", encoding="utf-8")
-    path.chmod(0o600 if is_within(path, STATE_DIR) or is_within(path, AUDIT_DIR) or is_within(path, BACKUP_DIR) else 0o644)
+    mode = 0o600 if is_within(path, STATE_DIR) or is_within(path, AUDIT_DIR) or is_within(path, BACKUP_DIR) else 0o644
+    runtime_safety.atomic_write_text(path, text, mode)
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -574,10 +600,7 @@ def append_jsonl(path: Path, value: Dict[str, Any]) -> None:
     line = json.dumps(value, sort_keys=True)
     if PRIVATE_KEY_RE.search(line):
         raise RuntimeError("private key content blocked")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\n")
-    path.chmod(0o600)
+    runtime_safety.durable_append_jsonl(path, value)
 
 
 def policy_hash() -> str:
@@ -586,11 +609,18 @@ def policy_hash() -> str:
 
 def build_policy() -> Dict[str, Any]:
     ensure_dirs()
-    write_json(POLICY_PATH, POLICY_TEMPLATE)
+    validation = validate_policy()
+    if validation["status"] != "GUARDED_AUTONOMY_POLICY_VALID":
+        return {
+            "status": "GUARDED_AUTONOMY_POLICY_OWNER_UPDATE_REQUIRED",
+            "policy_hash": validation.get("policy_hash"),
+            "expected_policy_hash": policy_hash(),
+            "findings": validation.get("findings", []),
+        }
     registry = build_action_registry()
     write_json(ACTION_REGISTRY_JSON, registry)
     return {
-        "status": "GUARDED_AUTONOMY_POLICY_BUILT",
+        "status": "GUARDED_AUTONOMY_POLICY_VERIFIED_NO_SOURCE_WRITE",
         "policy_hash": policy_hash(),
         "action_registry_hash": registry["registry_hash"],
     }
@@ -602,10 +632,13 @@ def validate_policy() -> Dict[str, Any]:
         "policy_json_valid": status == "ok" and isinstance(value, dict),
         "policy_exactly_matches_owner_approved_template": value == POLICY_TEMPLATE,
         "owner_policy_approved": isinstance(value, dict) and value.get("owner_policy_approved") is True,
-        "level_2_selected": isinstance(value, dict) and value.get("autonomy_level") == "LEVEL_2_GUARDED_AUTONOMY",
-        "low_live_policy_enabled": isinstance(value, dict) and value.get("low_live_enabled") is True,
+        "level_2_monitoring_selected": isinstance(value, dict) and value.get("autonomy_level") == "LEVEL_2_MONITORING_ACTIVE",
+        "low_live_fail_closed": isinstance(value, dict) and value.get("low_live_enabled") is False,
         "medium_disabled": isinstance(value, dict) and value.get("medium_live_enabled") is False,
         "high_disabled": isinstance(value, dict) and value.get("high_live_enabled") is False,
+        "autonomous_waf_disabled": isinstance(value, dict) and value.get("autonomous_waf_enabled") is False,
+        "external_mutation_disabled": isinstance(value, dict) and value.get("autonomous_external_mutation_enabled") is False,
+        "source_self_modification_disabled": isinstance(value, dict) and value.get("source_self_modification_enabled") is False,
         "two_phase_required": isinstance(value, dict) and value.get("two_phase_commit_required") is True,
         "canary_required": isinstance(value, dict) and value.get("canary_required") is True,
         "rollback_required": isinstance(value, dict) and value.get("rollback_required") is True,
@@ -804,22 +837,9 @@ def default_flags() -> Dict[str, bool]:
 
 
 def active_flags() -> Dict[str, bool]:
-    return {
-        "monitoring_enabled": True,
-        "local_analysis_enabled": True,
-        "local_draft_generation_enabled": True,
-        "validation_enabled": True,
-        "guarded_live_autonomy_enabled": True,
-        "low_live_apply_enabled": True,
-        "medium_live_apply_enabled": False,
-        "high_live_apply_enabled": False,
-        "unrestricted_shell_enabled": False,
-        "remote_write_lock": False,
-        "scheduler_install_lock": False,
-        "production_apply_lock": False,
-        "emergency_stop": False,
-        "breach": False,
-    }
+    # The final owner boundary permits autonomous monitoring and local derived
+    # state repair, but no autonomous external/WAF mutation.
+    return monitoring_flags()
 
 
 def monitoring_flags() -> Dict[str, bool]:
@@ -876,6 +896,7 @@ def default_state() -> Dict[str, Any]:
 
 
 def load_state() -> Dict[str, Any]:
+    self_healing = runtime_safety.heal_guarded_state_pair(STATE_JSON, LATEST_STATE_JSON)
     state = load_dict(STATE_JSON)
     if not state:
         state = default_state()
@@ -884,6 +905,14 @@ def load_state() -> Dict[str, Any]:
         state.setdefault(key, value)
     for key, value in default_flags().items():
         state.setdefault("flags", {}).setdefault(key, value)
+    state["self_healing"] = self_healing
+    if (
+        state.get("activation_stage") == "LEVEL_2_MONITORING_ACTIVE"
+        and not state.get("active_actions")
+        and state.get("flags", {}).get("low_live_apply_enabled") is False
+    ):
+        state["policy_hash"] = policy_hash()
+        state["registry_hash"] = build_action_registry()["registry_hash"]
     return state
 
 
@@ -1819,18 +1848,35 @@ def current_signals() -> Dict[str, Any]:
     status_counts = origin.get("comparison_scope", {}).get("current_snapshot", {}).get("status_code_counts", {})
     fake_scanner_count = 0
     actor_groups = set()
+    scanner_paths: List[str] = []
     for finding in website.get("correlation_v2_findings", []):
         if isinstance(finding, dict) and finding.get("signal_id") == "fake_nextjs_or_secret_scans":
             fake_scanner_count = int(finding.get("count") or 0)
             actor_groups.update(str(item) for item in finding.get("user_agents", []) if item)
+            scanner_paths.extend(
+                str(item) for item in finding.get("paths", [])
+                if isinstance(item, str) and item.startswith("/")
+            )
+    scanner_paths = sorted(set(scanner_paths))
+    scanner_paths_allowlisted = bool(scanner_paths) and all(scanner_path_allowlisted(path) for path in scanner_paths)
+    website_timestamp = parse_timestamp(website.get("generated_at_utc") or website.get("generated_at"))
+    scanner_evidence_fresh = bool(
+        website_timestamp
+        and timedelta(0) <= utc_now_dt() - website_timestamp <= timedelta(minutes=15)
+    )
+    eligible_scanner_count = fake_scanner_count if scanner_paths_allowlisted else 0
+    eligible_actor_count = len(actor_groups) if scanner_paths_allowlisted else 0
     tls_gate = load_dict(TLS_GATE_STATE_JSON)
     latest_526 = latest_monitor_status_count(526)
     baseline_526 = tls_gate.get("current_526")
     observed_526 = latest_526["count"] if latest_526["count"] is not None else int(status_counts.get("526") or 0)
     return {
-        "scanner_requests": fake_scanner_count,
-        "scanner_actor_groups": len(actor_groups),
-        "legitimate_scanner_path_use": False,
+        "scanner_requests": eligible_scanner_count,
+        "scanner_actor_groups": eligible_actor_count,
+        "scanner_paths": scanner_paths,
+        "scanner_paths_allowlisted": scanner_paths_allowlisted,
+        "scanner_evidence_fresh": scanner_evidence_fresh,
+        "legitimate_scanner_path_use": False if scanner_paths_allowlisted else None,
         "wp_login_volume": next((int(item.get("value") or 0) for item in website.get("metrics", []) if item.get("key") == "wp_login_503"), 0),
         "wp_login_automated_probability": "unknown",
         "admin_allowlist_present": "SENTINEL_ADMIN_ALLOWLIST_PRESENT" in set(private_env_metadata()["declared_keys"]),
@@ -1864,15 +1910,25 @@ def decide(signals: Dict[str, Any]) -> Dict[str, Any]:
         }
     scanner = int(signals.get("scanner_requests") or 0)
     actors = int(signals.get("scanner_actor_groups") or 0)
-    if scanner >= 100 and actors >= 2 and signals.get("legitimate_scanner_path_use") is False:
+    scanner_action = action_by_id("temporary_scanner_managed_challenge_v1") or {}
+    if (
+        scanner_action.get("enabled") is True
+        and scanner >= 100
+        and actors >= 2
+        and signals.get("scanner_paths_allowlisted") is True
+        and signals.get("scanner_evidence_fresh") is True
+        and signals.get("legitimate_scanner_path_use") is False
+    ):
         return {
             "decision": "LOW_LIVE_CANDIDATE",
             "candidate_action": "temporary_scanner_managed_challenge_v1",
             "reason": "High-confidence scanner paths crossed the static volume and actor thresholds.",
         }
     login_volume = int(signals.get("wp_login_volume") or 0)
+    login_action = action_by_id("temporary_wp_login_protection_v1") or {}
     if (
-        login_volume >= 100
+        login_action.get("enabled") is True
+        and login_volume >= 100
         and signals.get("wp_login_automated_probability") == "high"
         and signals.get("admin_allowlist_present") is True
         and signals.get("login_healthcheck_ok") is True
@@ -1883,7 +1939,12 @@ def decide(signals: Dict[str, Any]) -> Dict[str, Any]:
             "reason": "Automated login spike passed allowlist and health gates.",
         }
     if int(signals.get("status_503") or 0) > 0:
-        if signals.get("microcache_candidate_approved") and signals.get("anonymous_public_get"):
+        microcache_action = action_by_id("anonymous_microcache_canary_v1") or {}
+        if (
+            microcache_action.get("enabled") is True
+            and signals.get("microcache_candidate_approved")
+            and signals.get("anonymous_public_get")
+        ):
             return {
                 "decision": "LOW_LIVE_CANDIDATE",
                 "candidate_action": "anonymous_microcache_canary_v1",
@@ -1944,7 +2005,12 @@ def circuit_status(circuit: Dict[str, Any]) -> Dict[str, Any]:
     actions_hour = recent_rows(circuit.get("actions", []), 1)
     actions_day = recent_rows(circuit.get("actions", []), 24)
     failed_rollbacks = circuit.get("failed_rollbacks", [])
-    tripped = len(failures_hour) >= 2 or len(failed_rollbacks) >= 2 or circuit.get("emergency_stop") is True
+    limits = POLICY_TEMPLATE["action_limits"]
+    tripped = (
+        len(failures_hour) > int(limits["max_failed_actions_per_hour"])
+        or len(failed_rollbacks) > int(limits["max_failed_rollbacks"])
+        or circuit.get("emergency_stop") is True
+    )
     return {
         "status": "CIRCUIT_BREAKER_OPEN" if tripped else "CIRCUIT_BREAKER_ARMED",
         "tripped": tripped,
@@ -2228,6 +2294,9 @@ def install_systemd_units() -> Dict[str, Any]:
 def collect_preflight() -> Dict[str, Any]:
     policy = validate_policy()
     registry = validate_action_registry()
+    proof_policy = proof_remediation.load_policy()[1]
+    proof_layer = proof_remediation.self_test()
+    proof_verifier = remediation_verifier.self_test()
     rollback_test = deterministic_rollback_test()
     canary_test = deterministic_canary_test()
     source_scan = source_security_scan()
@@ -2274,6 +2343,9 @@ def collect_preflight() -> Dict[str, Any]:
         ("policy_json", policy["status"] == "GUARDED_AUTONOMY_POLICY_VALID", True, "Policy must exactly match the owner-approved template."),
         ("owner_policy_approved", POLICY_TEMPLATE["owner_policy_approved"] is True, True, "Owner policy reference is recorded."),
         ("action_registry", registry["status"] == "GUARDED_ACTION_REGISTRY_VALID", True, "All live actions must be registered LOW_LIVE actions."),
+        ("proof_policy", proof_policy["status"] == "PROOF_REMEDIATION_POLICY_VALID", True, "Every live candidate requires a valid proof contract."),
+        ("proof_builder", proof_layer["status"] == "PROOF_CARRYING_REMEDIATION_SELF_TEST_OK", True, "Proof envelopes must bind evidence, scope, runtime state, TTL, and rollback."),
+        ("independent_proof_verifier", proof_verifier["status"] == "INDEPENDENT_REMEDIATION_VERIFIER_SELF_TEST_OK", True, "An adapter-free verifier must approve PREPARE and COMMIT proofs."),
         ("no_medium_high_actions", not registry["medium_or_high_actions"], True, "MEDIUM and HIGH execution remains unavailable."),
         ("rollback_contract_test", rollback_test["status"] == "GUARDED_AUTONOMY_ROLLBACK_TEST_OK", True, "Injected failure must restore the exact before-state."),
         ("canary_contract_test", canary_test["status"] == "GUARDED_AUTONOMY_CANARY_OK", True, "Canary contract must include TTL, validation, and rollback."),
@@ -2313,6 +2385,9 @@ def collect_preflight() -> Dict[str, Any]:
         "blockers": blockers,
         "policy_validation": policy,
         "registry_validation": registry,
+        "proof_policy_validation": proof_policy,
+        "proof_layer_self_test": proof_layer,
+        "proof_verifier_self_test": proof_verifier,
         "rollback_test": rollback_test,
         "canary_test": canary_test,
         "source_security": source_scan,
@@ -2332,7 +2407,9 @@ def collect_preflight() -> Dict[str, Any]:
 def cycle_safety_gate(state: Dict[str, Any]) -> Dict[str, Any]:
     policy = validate_policy()
     registry = validate_action_registry()
+    proof_policy = proof_remediation.load_policy()[1]
     source = source_security_scan()
+    source_integrity = runtime_safety.verify_fixed_source_manifest()
     origin = load_dict(ORIGIN_DIAGNOSTICS_JSON)
     master = load_dict(MASTER_CONSISTENCY_JSON)
     health = load_dict(HEALTH_BASELINE_STATE_JSON)
@@ -2344,8 +2421,15 @@ def cycle_safety_gate(state: Dict[str, Any]) -> Dict[str, Any]:
         blockers.append("policy_hash_or_content_mismatch")
     if registry["status"] != "GUARDED_ACTION_REGISTRY_VALID" or state.get("registry_hash") != current_registry_hash:
         blockers.append("action_registry_hash_or_content_mismatch")
+    if proof_policy["status"] != "PROOF_REMEDIATION_POLICY_VALID":
+        blockers.append("proof_remediation_policy_invalid")
+    self_healing = state.get("self_healing", {})
+    if self_healing.get("status") not in {"SELF_HEAL_STATE_HEALTHY", "SELF_HEAL_REPAIRED"}:
+        blockers.append("derived_state_self_healing_not_proven_safe")
     if source["status"] != "SOURCE_SECURITY_OK":
         critical_findings.append("source_security_failure")
+    if source_integrity["status"] != "SOURCE_INTEGRITY_VERIFIED":
+        critical_findings.append("source_integrity_failure")
     if origin.get("safety", {}).get("breach") is True or master.get("safety", {}).get("breach") is True:
         critical_findings.append("current_breach")
     for name, path in (("origin_diagnostics_freshness", ORIGIN_DIAGNOSTICS_JSON), ("master_freshness", MASTER_CONSISTENCY_JSON)):
@@ -2414,6 +2498,9 @@ def audit_record(
         "risk": action.get("risk") if action else None,
         "policy_match": bool(action and action.get("owner_policy_reference") == OWNER_POLICY_REFERENCE),
         "preflight_result": results.get("preflight_result"),
+        "proof_prepare_result": results.get("proof_prepare_result"),
+        "proof_commit_result": results.get("proof_commit_result"),
+        "transaction_recovery": results.get("transaction_recovery"),
         "monitoring_decision": results.get("monitoring_decision"),
         "decision": decision,
         "reason": reason,
@@ -2431,6 +2518,131 @@ def audit_record(
 def append_decision_audit(record: Dict[str, Any]) -> None:
     append_jsonl(AUDIT_JSONL, record)
     append_jsonl(ACTIONS_AUDIT_JSONL, record)
+
+
+def recover_incomplete_remediation_transaction(state: Dict[str, Any]) -> Dict[str, Any]:
+    transaction = runtime_safety.load_transaction()
+    classification = runtime_safety.classify_incomplete_transaction(transaction)
+    if classification["status"] == "TRANSACTION_CLEAN":
+        return {**classification, "handled": False}
+    if classification["status"] == "TRANSACTION_ABORT_SAFE":
+        runtime_safety.advance_transaction(
+            "ABORTED_NO_APPLY",
+            recovery_reason="process_interrupted_before_productive_write",
+        )
+        return {
+            **classification,
+            "handled": True,
+            "decision": "CRASH_RECOVERY_ABORTED_PRE_APPLY",
+            "execution": "NO_ACTION",
+            "reason": "Incomplete pre-apply transaction was closed without a productive write.",
+        }
+    if classification["status"] != "TRANSACTION_UNCERTAIN_APPLY":
+        trip_runtime_emergency(
+            state,
+            "GUARDED_AUTONOMY_EMERGENCY_STOP_INVALID_TRANSACTION",
+            "invalid remediation transaction metadata",
+            breach=True,
+        )
+        return {
+            **classification,
+            "handled": True,
+            "decision": "EMERGENCY_STOP",
+            "execution": "NO_ACTION",
+            "reason": "Invalid remediation transaction metadata failed closed.",
+        }
+
+    action_id = str(transaction.get("action_id") or "")
+    artifact_id = str(transaction.get("artifact_id") or "")
+    action = action_by_id(action_id)
+    artifact_path = BACKUP_DIR / artifact_id
+    if (
+        not action
+        or not artifact_id
+        or artifact_path.name != artifact_id
+        or not is_within(artifact_path, BACKUP_DIR)
+        or artifact_path.is_symlink()
+    ):
+        runtime_safety.advance_transaction("ROLLBACK_FAILED", recovery_reason="rollback_identity_invalid")
+        trip_runtime_emergency(
+            state,
+            "GUARDED_AUTONOMY_EMERGENCY_STOP_CRASH_RECOVERY",
+            "uncertain write has no exact safe rollback identity",
+            breach=True,
+        )
+        return {
+            **classification,
+            "handled": True,
+            "decision": "EMERGENCY_STOP",
+            "execution": "ROLLBACK_NOT_AVAILABLE",
+            "reason": "Uncertain productive write could not be bound to an exact rollback artifact.",
+        }
+    artifact = load_dict(artifact_path)
+    if not artifact:
+        runtime_safety.advance_transaction("ROLLBACK_FAILED", recovery_reason="rollback_artifact_missing")
+        trip_runtime_emergency(
+            state,
+            "GUARDED_AUTONOMY_EMERGENCY_STOP_CRASH_RECOVERY",
+            "uncertain write rollback artifact is missing",
+            breach=True,
+        )
+        return {
+            **classification,
+            "handled": True,
+            "decision": "EMERGENCY_STOP",
+            "execution": "ROLLBACK_NOT_AVAILABLE",
+            "reason": "Uncertain productive write has no readable rollback artifact.",
+        }
+    artifact["artifact_path"] = str(artifact_path)
+    adapter = CloudflareGuardedAdapter()
+    try:
+        reconciliation = adapter.reconcile_rollback_artifact(action, artifact)
+    except RuntimeError as exc:
+        reconciliation = {"status": "RECONCILIATION_FAILED", "reason": type(exc).__name__}
+    if reconciliation.get("status") == "NO_REMOTE_CHANGE_DETECTED":
+        runtime_safety.advance_transaction("ROLLED_BACK", recovery_reason="no_remote_change_detected")
+        return {
+            **classification,
+            "handled": True,
+            "decision": "CRASH_RECOVERY_COMPLETE",
+            "execution": "NO_REMOTE_CHANGE_DETECTED",
+            "reason": "Read-only reconciliation proved that the interrupted apply made no remote change.",
+        }
+    if reconciliation.get("status") == "ROLLBACK_ARTIFACT_RECOVERED":
+        state["last_action"] = {**artifact, "cycle_id": transaction.get("cycle_id"), "action_id": action_id}
+        rollback = execute_rollback(state, "crash_recovery_uncertain_apply")
+        target = "ROLLED_BACK" if rollback.get("status") == "ROLLBACK_OK" else "ROLLBACK_FAILED"
+        runtime_safety.advance_transaction(target, recovery_reason=rollback.get("status"))
+        if rollback.get("status") != "ROLLBACK_OK":
+            trip_runtime_emergency(
+                state,
+                "GUARDED_AUTONOMY_EMERGENCY_STOP_CRASH_ROLLBACK_FAILURE",
+                "automatic crash recovery rollback failed",
+                breach=True,
+            )
+        return {
+            **classification,
+            "handled": True,
+            "decision": "CRASH_RECOVERY_ROLLBACK",
+            "execution": rollback.get("status"),
+            "reason": "Interrupted productive write was reconciled and rolled back.",
+            "rollback_result": rollback,
+        }
+    runtime_safety.advance_transaction("ROLLBACK_FAILED", recovery_reason="unexplained_remote_state")
+    trip_runtime_emergency(
+        state,
+        "GUARDED_AUTONOMY_EMERGENCY_STOP_CRASH_RECOVERY",
+        "uncertain productive write has unexplained remote state",
+        breach=True,
+    )
+    return {
+        **classification,
+        "handled": True,
+        "decision": "EMERGENCY_STOP",
+        "execution": "ROLLBACK_FAILED",
+        "reason": "Uncertain productive write could not be reconciled exactly.",
+        "reconciliation_status": reconciliation.get("status"),
+    }
 
 
 def execute_rollback(state: Dict[str, Any], reason: str) -> Dict[str, Any]:
@@ -2469,7 +2681,7 @@ def execute_rollback(state: Dict[str, Any], reason: str) -> Dict[str, Any]:
         )
     else:
         circuit.setdefault("failed_rollbacks", []).append({"timestamp": utc_now(), "action_id": last.get("action_id"), "reason": result.get("reason")})
-        if len(circuit["failed_rollbacks"]) >= 2:
+        if len(circuit["failed_rollbacks"]) > POLICY_TEMPLATE["action_limits"]["max_failed_rollbacks"]:
             if state.get("machine_state") == ROLLBACK:
                 transition(state, EMERGENCY_STOP)
             state["flags"].update(default_flags())
@@ -2505,6 +2717,15 @@ def trip_runtime_emergency(state: Dict[str, Any], status: str, reason: str, brea
 
 
 def rearm_after_safe_cleanup(state: Dict[str, Any]) -> Dict[str, Any]:
+    if POLICY_TEMPLATE["autonomous_external_mutation_enabled"] is False:
+        state["machine_state"] = PREFLIGHT
+        state["activation_stage"] = "LEVEL_2_MONITORING_ACTIVE"
+        state["autonomy_level"] = "LEVEL_2_MONITORING_ACTIVE"
+        state["flags"].update(monitoring_flags())
+        state["status"] = "GUARDED_MONITORING_ACTIVE"
+        state["policy_hash"] = policy_hash()
+        state["registry_hash"] = build_action_registry()["registry_hash"]
+        return {"status": "REARMED_MONITORING_ONLY", "blockers": ["autonomous_external_mutation_disabled"]}
     result = collect_preflight()
     state["preflight"] = result
     if result["status"] != "GUARDED_AUTONOMY_PREFLIGHT_GREEN":
@@ -2650,6 +2871,13 @@ def process_active_action(state: Dict[str, Any], signals: Dict[str, Any]) -> Dic
 
 
 def auto_promote_guarded_canary(state: Dict[str, Any]) -> Dict[str, Any]:
+    if POLICY_TEMPLATE["autonomous_external_mutation_enabled"] is False:
+        result = {
+            "status": "RUNTIME_PROMOTION_DISABLED_BY_OWNER_BOUNDARY",
+            "findings": ["autonomous_external_mutation_disabled"],
+        }
+        write_json(RUNTIME_PROMOTION_STATE_JSON, result)
+        return result
     if state.get("machine_state") != CANARY or state.get("activation_stage") != "LEVEL_2_GUARDED_CANARY":
         return {"status": "RUNTIME_PROMOTION_NOT_APPLICABLE"}
     window = load_dict(CANARY_WINDOW_STATE_JSON)
@@ -2738,6 +2966,7 @@ def auto_promote_guarded_canary(state: Dict[str, Any]) -> Dict[str, Any]:
 def run_cycle() -> Dict[str, Any]:
     with runtime_cycle_lock():
         state = load_state()
+        transaction_recovery = recover_incomplete_remediation_transaction(state)
         cycle_id = f"guarded-{utc_now_dt().strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
         if state.get("first_cycle_id") is None:
             state["first_cycle_id"] = cycle_id
@@ -2779,9 +3008,23 @@ def run_cycle() -> Dict[str, Any]:
         rollback_result: Any = None
         before_hash = None
         after_hash = None
+        proof_prepare_result: Any = None
+        proof_commit_result: Any = None
         lifecycle_handled = False
         safety_handled = False
         cycle_gate = cycle_safety_gate(state)
+
+        if transaction_recovery.get("handled") is True:
+            safety_handled = True
+            decision = str(transaction_recovery.get("decision") or "CRASH_RECOVERY")
+            execution = str(transaction_recovery.get("execution") or "NO_ACTION")
+            reason = str(transaction_recovery.get("reason") or "Incomplete transaction reconciled fail-closed.")
+            candidate = None
+            rollback_result = transaction_recovery.get("rollback_result")
+            validation_result = {
+                "status": transaction_recovery.get("status"),
+                "phase": transaction_recovery.get("phase"),
+            }
 
         if state.get("activation_stage") in {"LEVEL_2_MONITORING_ACTIVE", "LEVEL_2_SCHEDULER_VERIFICATION"}:
             validation_result = staged_health or {"status": "HEALTH_TARGET_GATE_BLOCKED"}
@@ -2873,12 +3116,50 @@ def run_cycle() -> Dict[str, Any]:
             reason = "TLS gate or new 526 growth paused new live actions without changing SSL or certificates."
         elif candidate:
             action = action_by_id(candidate)
+            proof_gate_ok = False
+            proof_gate_reason = "proof_build_not_attempted"
+            proof_envelope: Optional[Dict[str, Any]] = None
+            if action and action.get("enabled"):
+                proof_build = proof_remediation.build_runtime_candidate_proof(
+                    candidate,
+                    action,
+                    signals,
+                    state,
+                    cycle_id,
+                    write=True,
+                )
+                proof_envelope = proof_build.get("envelope")
+                if isinstance(proof_envelope, dict):
+                    proof_prepare_result = remediation_verifier.verify_runtime_envelope(
+                        proof_envelope,
+                        "PREPARE",
+                        write=True,
+                    )
+                    proof_gate_ok = proof_prepare_result.get("status") == "PROOF_PREPARE_VERIFIED"
+                    proof_gate_reason = (
+                        "proof_prepare_verified"
+                        if proof_gate_ok
+                        else "proof_prepare_blocked:" + ",".join(proof_prepare_result.get("findings", []))
+                    )
+                else:
+                    proof_prepare_result = {
+                        "status": "PROOF_VERIFICATION_BLOCKED",
+                        "findings": [proof_build.get("reason", "proof_build_failed")],
+                        "verified": False,
+                        "breach": False,
+                    }
+                    proof_gate_reason = str(proof_build.get("reason") or "proof_build_failed")
             if not action or not action.get("enabled"):
                 decision = "NO_ACTION"
                 reason = "Candidate is registered but not runtime-enabled."
             else:
                 rate_ok, rate_reason = rate_limit_allows(circuit, candidate, state.get("activation_stage"))
-                if not rate_ok:
+                if not proof_gate_ok:
+                    decision = "NO_ACTION"
+                    execution = "PROOF_GATE_BLOCKED"
+                    reason = proof_gate_reason
+                    validation_result = proof_prepare_result
+                elif not rate_ok:
                     decision = "NO_ACTION"
                     reason = rate_reason
                 elif action["apply_adapter"] != "CloudflareGuardedAdapter":
@@ -2889,14 +3170,44 @@ def run_cycle() -> Dict[str, Any]:
                     artifact: Optional[Dict[str, Any]] = None
                     apply_attempted = False
                     try:
+                        runtime_safety.start_transaction(cycle_id, candidate)
                         baseline_health = adapter.healthcheck()
                         if baseline_health["status"] != "HEALTHCHECK_OK":
                             raise RuntimeError("baseline_healthcheck_failed")
                         before_5xx = int(signals.get("status_503") or 0) + int(signals.get("status_504") or 0)
                         artifact = adapter.prepare(action, cycle_id, {"healthcheck": baseline_health, "five_xx": before_5xx})
                         before_hash = artifact["before_hash"]
+                        runtime_safety.advance_transaction(
+                            "ROLLBACK_ARTIFACT_READY",
+                            artifact_id=Path(artifact["artifact_path"]).name,
+                            before_hash=before_hash,
+                        )
+                        finalized_proof = proof_remediation.finalize_runtime_candidate_proof(
+                            proof_envelope or {},
+                            artifact,
+                            write=True,
+                        )
+                        commit_envelope = finalized_proof.get("envelope")
+                        if not isinstance(commit_envelope, dict):
+                            raise RuntimeError("proof_commit_build_blocked")
+                        proof_commit_result = remediation_verifier.verify_runtime_envelope(
+                            commit_envelope,
+                            "COMMIT",
+                            write=True,
+                        )
+                        if proof_commit_result.get("status") != "PROOF_COMMIT_VERIFIED":
+                            raise RuntimeError("proof_commit_gate_blocked")
+                        runtime_safety.advance_transaction(
+                            "COMMIT_VERIFIED",
+                            proof_id=commit_envelope.get("proof_id"),
+                        )
                         apply_attempted = True
+                        runtime_safety.advance_transaction("APPLY_STARTED")
                         canary_result = adapter.apply_scope(action, artifact, canary=True)
+                        runtime_safety.advance_transaction(
+                            "CANARY_APPLIED",
+                            after_hash=artifact.get("after_hash"),
+                        )
                         canary_health = adapter.healthcheck()
                         canary_profile = compare_health_profiles(
                             baseline_health["baseline"],
@@ -2909,6 +3220,8 @@ def run_cycle() -> Dict[str, Any]:
                             raise RuntimeError("canary_validation_failed")
                         apply_result = adapter.apply_scope(action, artifact, canary=False)
                         after_hash = artifact["after_hash"]
+                        runtime_safety.advance_transaction("ACTIVE_APPLIED", after_hash=after_hash)
+                        runtime_safety.advance_transaction("VALIDATING")
                         post_health = adapter.healthcheck()
                         post_profile = compare_health_profiles(
                             baseline_health["baseline"],
@@ -2919,6 +3232,7 @@ def run_cycle() -> Dict[str, Any]:
                             state["last_action"] = {**artifact, "cycle_id": cycle_id, "action_id": candidate}
                             rollback_result = execute_rollback(state, "post_apply_validation_failed")
                             raise RuntimeError("post_apply_validation_failed")
+                        runtime_safety.advance_transaction("VALIDATED_COMPLETE")
                         execution = "LOW_LIVE_APPLIED"
                         expires_at = artifact["expires_at"]
                         state["last_action"] = {**artifact, "cycle_id": cycle_id, "action_id": candidate}
@@ -2951,6 +3265,15 @@ def run_cycle() -> Dict[str, Any]:
                                         "unexplained remote hash mismatch",
                                         breach=True,
                                     )
+                        transaction = runtime_safety.load_transaction()
+                        transaction_phase = str(transaction.get("phase") or "IDLE")
+                        if transaction_phase in runtime_safety.PRE_APPLY_PHASES:
+                            runtime_safety.advance_transaction("ABORTED_NO_APPLY", failure_reason=reason)
+                        elif transaction_phase in runtime_safety.UNCERTAIN_APPLY_PHASES:
+                            if isinstance(rollback_result, dict) and rollback_result.get("status") == "ROLLBACK_OK":
+                                runtime_safety.advance_transaction("ROLLED_BACK", failure_reason=reason)
+                            elif state.get("flags", {}).get("breach") is True:
+                                runtime_safety.advance_transaction("ROLLBACK_FAILED", failure_reason=reason)
                         circuit.setdefault("failures", []).append({"timestamp": utc_now(), "action_id": candidate, "cycle_id": cycle_id, "reason": reason})
                         if circuit_status(circuit)["failed_actions_last_hour"] >= 2:
                             trip_runtime_emergency(
@@ -2969,7 +3292,10 @@ def run_cycle() -> Dict[str, Any]:
             decision,
             reason,
             preflight_result=state.get("preflight", {}).get("status"),
+            proof_prepare_result=(proof_prepare_result or {}).get("status") if isinstance(proof_prepare_result, dict) else proof_prepare_result,
+            proof_commit_result=(proof_commit_result or {}).get("status") if isinstance(proof_commit_result, dict) else proof_commit_result,
             monitoring_decision=(monitoring_observation or {}).get("autonomous_decision"),
+            transaction_recovery=transaction_recovery.get("status"),
             canary_result=canary_result,
             apply_result=apply_result,
             validation_result=validation_result,
@@ -2986,9 +3312,13 @@ def run_cycle() -> Dict[str, Any]:
             "execution": execution,
             "reason": reason,
             "healthcheck": validation_result or {"status": "NOT_RUN"},
+            "proof_prepare": proof_prepare_result or {"status": "NOT_RUN"},
+            "proof_commit": proof_commit_result or {"status": "NOT_RUN"},
             "monitoring_decision": (monitoring_observation or {}).get(
                 "autonomous_decision", {"status": "NOT_RUN"}
             ),
+            "transaction_recovery": transaction_recovery,
+            "transaction": runtime_safety.load_transaction(),
             "circuit_breaker": circuit_view,
         }
         state["runtime_promotion"] = auto_promote_guarded_canary(state)
@@ -3067,6 +3397,17 @@ def pause_runtime() -> Dict[str, Any]:
 
 
 def resume_runtime() -> Dict[str, Any]:
+    if POLICY_TEMPLATE["autonomous_external_mutation_enabled"] is False:
+        state = load_state()
+        state["activation_stage"] = "LEVEL_2_MONITORING_ACTIVE"
+        state["autonomy_level"] = "LEVEL_2_MONITORING_ACTIVE"
+        state["machine_state"] = PREFLIGHT
+        state["flags"].update(monitoring_flags())
+        state["status"] = "GUARDED_MONITORING_ACTIVE"
+        write_state(state, record_history=True)
+        report = build_runtime_report(state)
+        write_reports(report)
+        return report
     report = preflight()
     state = load_state()
     if state["preflight"]["status"] == "GUARDED_AUTONOMY_PREFLIGHT_GREEN" and state["machine_state"] == DEGRADED:
@@ -3323,7 +3664,26 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
     policy = validate_policy()
     canary = deterministic_canary_test()
     rollback = deterministic_rollback_test()
-    test_a = decide({"status_526": 0, "scanner_requests": 100, "scanner_actor_groups": 3, "legitimate_scanner_path_use": False, "status_503": 0, "status_522": 0})
+    test_a = decide({
+        "status_526": 0,
+        "scanner_requests": 100,
+        "scanner_actor_groups": 3,
+        "scanner_paths_allowlisted": True,
+        "scanner_evidence_fresh": True,
+        "legitimate_scanner_path_use": False,
+        "status_503": 0,
+        "status_522": 0,
+    })
+    test_a_mixed_paths = decide({
+        "status_526": 0,
+        "scanner_requests": 100,
+        "scanner_actor_groups": 3,
+        "scanner_paths_allowlisted": False,
+        "scanner_evidence_fresh": True,
+        "legitimate_scanner_path_use": None,
+        "status_503": 0,
+        "status_522": 0,
+    })
     test_b = decide({"status_526": 0, "scanner_requests": 0, "scanner_actor_groups": 0, "legitimate_scanner_path_use": False, "wp_login_volume": 3, "wp_login_automated_probability": "low", "status_503": 0, "status_522": 0})
     test_c = decide({"status_526": 0, "scanner_requests": 0, "scanner_actor_groups": 0, "legitimate_scanner_path_use": False, "wp_login_volume": 150, "wp_login_automated_probability": "high", "admin_allowlist_present": True, "login_healthcheck_ok": True, "status_503": 0, "status_522": 0})
     test_d = decide({"status_526": 0, "scanner_requests": 0, "scanner_actor_groups": 0, "legitimate_scanner_path_use": False, "status_503": 200, "microcache_candidate_approved": False, "anonymous_public_get": False, "status_522": 0})
@@ -3344,6 +3704,23 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
     rate_limit_test = rate_limit_allows(synthetic_rate_limit, "temporary_scanner_managed_challenge_v1")
     source_scan = source_security_scan()
     unit_validation = systemd_source_validation()
+    proof_layer_test = proof_remediation.self_test()
+    independent_verifier_test = remediation_verifier.self_test()
+    runtime_safety_test = runtime_safety.self_test()
+    runtime_source = Path(__file__).read_text(encoding="utf-8")
+    proof_gate_ordering = False
+    try:
+        run_cycle_offset = runtime_source.index("def run_cycle()")
+        proof_build_offset = runtime_source.index("proof_remediation.build_runtime_candidate_proof", run_cycle_offset)
+        prepare_verify_offset = runtime_source.index("remediation_verifier.verify_runtime_envelope", proof_build_offset)
+        adapter_prepare_offset = runtime_source.index("adapter.prepare", prepare_verify_offset)
+        commit_verify_offset = runtime_source.index("remediation_verifier.verify_runtime_envelope", adapter_prepare_offset)
+        apply_offset = runtime_source.index("adapter.apply_scope", commit_verify_offset)
+        proof_gate_ordering = (
+            proof_build_offset < prepare_verify_offset < adapter_prepare_offset < commit_verify_offset < apply_offset
+        )
+    except ValueError:
+        proof_gate_ordering = False
     scanner_action = action_by_id("temporary_scanner_managed_challenge_v1") or {}
     login_action = action_by_id("temporary_wp_login_protection_v1") or {}
     transition_state = default_state()
@@ -3366,12 +3743,13 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
     symlink_escape_blocked = not output_path_allowed(PROJECT_DIR.parent / "outside.json")
     real_symlink_escape_blocked = deterministic_symlink_escape_test()
     checks = {
-        "test_a_scanner_candidate": test_a["candidate_action"] == "temporary_scanner_managed_challenge_v1" and scanner_action.get("maximum_ttl", 99) <= 30,
+        "test_a_scanner_candidate_blocked_by_owner_boundary": test_a["candidate_action"] is None and scanner_action.get("enabled") is False,
+        "test_a_mixed_scanner_paths_blocked": test_a_mixed_paths["candidate_action"] is None,
         "test_a_canary_rollback": scanner_action.get("canary_plan", {}).get("required") is True and bool(scanner_action.get("rollback_adapter")),
         "test_b_normal_login_no_action": test_b["decision"] == "NO_ACTION",
-        "test_c_login_candidate_not_permanent_block": test_c["candidate_action"] == "temporary_wp_login_protection_v1" and set(login_action.get("scope", {}).get("allowed_actions", [])) == {"managed_challenge", "rate_limit"},
+        "test_c_login_candidate_disabled": test_c["candidate_action"] is None and login_action.get("enabled") is False,
         "test_d_503_monitor_escalate": test_d["decision"] == "MONITOR_AND_ESCALATE",
-        "test_e_microcache_candidate": test_e["candidate_action"] == "anonymous_microcache_canary_v1",
+        "test_e_microcache_candidate_disabled": test_e["candidate_action"] is None,
         "test_e_failed_validation_rolls_back": rollback["rollback_restored_before_state"] is True,
         "test_f_526_pauses": test_f["decision"] == "PAUSE_AND_ALERT",
         "test_g_10_percent_rollback": test_g[0] is True and "five_xx_increase_gte_10_percent" in test_g[1],
@@ -3381,6 +3759,10 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
         "policy_valid": policy["status"] == "GUARDED_AUTONOMY_POLICY_VALID",
         "registry_valid": registry["status"] == "GUARDED_ACTION_REGISTRY_VALID",
         "all_actions_low_live": not registry["medium_or_high_actions"],
+        "no_autonomous_external_action_enabled": not any(
+            action.get("enabled") and action.get("apply_adapter") != "ReportOnlyAdapter"
+            for action in REGISTERED_ACTIONS
+        ),
         "every_action_has_ttl_canary_rollback_validation": all(
             action.get("maximum_ttl") and action.get("canary_plan", {}).get("required") and action.get("rollback_adapter") and action.get("validation_checks")
             for action in REGISTERED_ACTIONS
@@ -3405,6 +3787,11 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
         "breach_false": default_flags()["breach"] is False,
         "canary_contract": canary["status"] == "GUARDED_AUTONOMY_CANARY_OK",
         "rollback_contract": rollback["status"] == "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
+        "proof_layer_contract": proof_layer_test["status"] == "PROOF_CARRYING_REMEDIATION_SELF_TEST_OK",
+        "independent_verifier_contract": independent_verifier_test["status"] == "INDEPENDENT_REMEDIATION_VERIFIER_SELF_TEST_OK",
+        "proof_gate_ordering": proof_gate_ordering,
+        "runtime_crash_safety": runtime_safety_test["status"] == "RUNTIME_SAFETY_SELF_TEST_OK",
+        "source_self_modification_disabled": POLICY_TEMPLATE["source_self_modification_enabled"] is False,
     }
     findings = [name for name, passed in checks.items() if not passed]
     result = {
@@ -3497,7 +3884,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         result = build_policy()
         initialize_outputs()
         print(result["status"])
-        return 0
+        return 0 if result["status"] == "GUARDED_AUTONOMY_POLICY_VERIFIED_NO_SOURCE_WRITE" else 2
     if args.validate_policy:
         result = validate_policy()
         print(result["status"])

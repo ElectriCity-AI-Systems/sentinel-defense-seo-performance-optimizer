@@ -1,6 +1,6 @@
 {
   "cooldown_after_rollback_minutes": 30,
-  "emergency_stop_after_failed_rollbacks": 2,
+  "emergency_stop_after_failed_rollbacks": 1,
   "name": "sentinel-automatic-rollback",
   "rollback_scope": "sentinel_owned_changes_only",
   "triggers": [

@@ -1,0 +1,32 @@
+{
+  "schema_version": "sentinel-playbook-1",
+  "playbook_id": "sentinel-independent-remediation-verifier",
+  "mode": "READ_ONLY_VERIFICATION",
+  "fixed_inputs": [
+    "proof_policy",
+    "pending_proof",
+    "guarded_policy",
+    "action_registry",
+    "runtime_state",
+    "health_baseline",
+    "tls_gate",
+    "write_canary",
+    "circuit_breaker",
+    "rollback_artifact"
+  ],
+  "checks": [
+    "proof_hash",
+    "contract_hash",
+    "scope_hash",
+    "evidence_hashes_and_freshness",
+    "runtime_flags",
+    "change_budget",
+    "trigger_exactness",
+    "rollback_artifact_identity"
+  ],
+  "adapter_access": false,
+  "credential_access": false,
+  "network_access": false,
+  "productive_write": false,
+  "breach": false
+}

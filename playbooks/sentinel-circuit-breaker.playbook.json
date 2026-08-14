@@ -1,10 +1,10 @@
 {
   "automatic_emergency_stop": true,
   "global_cooldown_minutes": 30,
-  "max_actions_per_day": 12,
-  "max_actions_per_hour": 3,
-  "max_failed_actions_per_hour": 2,
-  "max_failed_rollbacks": 2,
-  "max_identical_action_retries": 1,
+  "max_actions_per_day": 4,
+  "max_actions_per_hour": 1,
+  "max_failed_actions_per_hour": 1,
+  "max_failed_rollbacks": 0,
+  "max_identical_action_retries": 0,
   "name": "sentinel-circuit-breaker"
 }

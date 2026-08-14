@@ -1,0 +1,20 @@
+{
+  "schema_version": "sentinel-playbook-1",
+  "playbook_id": "sentinel-remediation-change-budget",
+  "mode": "FAIL_CLOSED",
+  "limits": {
+    "max_active_actions": 1,
+    "max_actions_per_hour": 1,
+    "max_failed_actions_per_hour": 1,
+    "max_failed_rollbacks": 0,
+    "maximum_ttl_minutes": 10,
+    "rollback_timeout_seconds": 30,
+    "global_cooldown_minutes": 30
+  },
+  "on_budget_exhausted": "MONITOR_AND_ESCALATE",
+  "monitoring_remains_enabled": true,
+  "automatic_policy_expansion": false,
+  "medium_enabled": false,
+  "high_enabled": false,
+  "breach": false
+}

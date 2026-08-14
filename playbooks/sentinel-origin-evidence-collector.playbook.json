@@ -1,0 +1,29 @@
+{
+  "schema_version": "sentinel-playbook-1",
+  "playbook_id": "sentinel-origin-evidence-collector",
+  "mode": "LOCAL_READ_ONLY_INPUT_NORMALIZATION",
+  "source_scope": "fixed_project_local_spool",
+  "accepted_formats": [
+    "json",
+    "jsonl",
+    "log"
+  ],
+  "recognized_evidence": [
+    "php_fatal",
+    "wordpress_application_error",
+    "origin_upstream_timeout",
+    "origin_upstream_failure",
+    "hosting_resource_limit",
+    "database_failure",
+    "origin_tls_failure"
+  ],
+  "privacy": {
+    "raw_log_lines_stored": false,
+    "file_names_stored": false,
+    "paths_fingerprinted": true,
+    "secret_rows_skipped": true
+  },
+  "remote_access": false,
+  "production_write": false,
+  "breach": false
+}

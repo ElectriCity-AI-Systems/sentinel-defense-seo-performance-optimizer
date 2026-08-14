@@ -1,0 +1,19 @@
+{
+  "schema_version": "sentinel-playbook-1",
+  "playbook_id": "sentinel-local-self-healing",
+  "mode": "LOCAL_DERIVED_STATE_ONLY",
+  "repair_scope": [
+    "state/adaptive-learning/guarded_autonomy.json",
+    "state/adaptive-learning/latest_guarded_autonomy.json"
+  ],
+  "required_evidence": "exact_valid_mirror_and_invalid_or_missing_peer",
+  "cause_proven_required": true,
+  "backup_required_when_source_bytes_exist": true,
+  "post_write_hash_verification": true,
+  "rollback_on_verify_failure": true,
+  "evidence_conflict_result": "NO_CHANGE",
+  "network": false,
+  "remote_write": false,
+  "source_modification": false,
+  "breach": false
+}

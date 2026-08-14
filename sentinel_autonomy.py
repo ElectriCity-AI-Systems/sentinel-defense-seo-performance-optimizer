@@ -68,6 +68,9 @@ COMMANDS = {
     "monitoring-decision": ["python3", "sentinel_monitoring_decision_engine.py", "--status"],
     "recovery-refresh": ["python3", "sentinel_monitoring_decision_engine.py", "--refresh-recovery"],
     "nowplaying-correlation": ["python3", "sentinel_monitoring_decision_engine.py", "--correlate-nowplaying"],
+    "production-readiness": ["python3", "sentinel_autonomous_production_readiness.py", "--status"],
+    "production-evaluate": ["python3", "sentinel_autonomous_production_readiness.py", "--evaluate"],
+    "production-source-integrity": ["python3", "sentinel_autonomous_production_readiness.py", "--verify-source"],
 }
 
 

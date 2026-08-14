@@ -1,0 +1,31 @@
+{
+  "schema_version": "sentinel-autonomous-production-source-manifest-1",
+  "sealed_scope": "fixed_runtime_source_policy_units_and_playbooks",
+  "source_self_modification_enabled": false,
+  "files": {
+    "config/guarded-autonomy-policy.json": "52b6baf1e4a17e5b0288345f100651163593981783844891bfec36d0a47668fd",
+    "config/proof-carrying-remediation-policy.json": "70cc7a0983795e6c14b6d8f9195d10ae99ab7d38f7ee700c8497694ab4e4bcf1",
+    "playbooks/sentinel-24x7-scheduler.playbook.json": "3a5cdc5079001aea1cf4932620a7353a3370f3ef846830992c613f9452b1ce92",
+    "playbooks/sentinel-automatic-rollback.playbook.json": "3729b810ca34293cb3f32f020a4c5bdad11858635f7b1cb885ba38ca83b970bc",
+    "playbooks/sentinel-autonomous-production-readiness.playbook.json": "88b29eae3c04b19c4490160d3796d819e314d1ef4f0efaf046ed263868e22959",
+    "playbooks/sentinel-circuit-breaker.playbook.json": "6869a9a647185e36f26fb8b0eab45e79d1737401d31f256a81d21dde035440f1",
+    "playbooks/sentinel-guarded-autonomy.playbook.json": "721c5b38c7fdd3e7977daa148faf1c905fe529d56a417070fdf891dcb172a430",
+    "playbooks/sentinel-independent-remediation-verifier.playbook.json": "201b0acec1366380fd5011f0473dc72f5109acd9b7aceffc442e04a2dd7e1d0e",
+    "playbooks/sentinel-local-self-healing.playbook.json": "f97a5e34e14fb65f06a4b3b2e8854c2d564ecd11c5931b1a279e45d118a1d89e",
+    "playbooks/sentinel-low-live-actions.playbook.json": "87b8fe721c5fe9d465392e10a9d3c1281548aeec5c6557f42359ac9518c672b2",
+    "playbooks/sentinel-origin-evidence-collector.playbook.json": "2720e081fad7a561fe94933ffdb590af41020e164870fc88e8bd961528e860f4",
+    "playbooks/sentinel-proof-carrying-remediation.playbook.json": "1a665933e5bc338bad9f8ce4a5869a679c1f2a42409888b6fef4fd083a49e7dc",
+    "playbooks/sentinel-remediation-change-budget.playbook.json": "e21ebab4cdadd65d14338cd72d33274778eacf25f9e5a631018d9e775b6aafd2",
+    "playbooks/sentinel-runtime-crash-safety.playbook.json": "759258e0497245c01a1ff780e539b8d9aabab2b9e64aa77329a2ec32124ce76f",
+    "sentinel_autonomous_production_readiness.py": "fed5ed542bcfba910179704adf106c78f5b8628113b958dc8e675351c094a341",
+    "sentinel_autonomy.py": "b16619ae517d0e5e656f580df7fa74f326ecafa85fe1fc81131b49bac162921d",
+    "sentinel_guarded_autonomy.py": "6e4a84b32d08b6ca9094638bf6be07c9ff536588f03d80fb3a48f4d51eea6f93",
+    "sentinel_independent_remediation_verifier.py": "e71a63d45f506956ed3946b80ac0f77e153cd87298041709dfd52b2a779f410e",
+    "sentinel_monitoring_decision_engine.py": "b90174aa54ae9e0391d8ef5185d3b7b78969cd5454e4a82f378b87c4ba772981",
+    "sentinel_origin_evidence_collector.py": "8d43cfc287454fe433492d03f3523f86ddfdb02ef47089355af2d69095bc61d7",
+    "sentinel_proof_carrying_remediation.py": "909d52900884f8e469bd0b11e50344159a1511ef05f8a34d9200b753b9ddeaa2",
+    "sentinel_runtime_safety.py": "a7a0e62ce1ee9846df98ec8747e2b4e0c1e3cfd2fa7293f50ded9c5c6d5c3ba6",
+    "systemd/sentinel-guarded-autonomy.service": "7b4fe8c4aec8ed205927e5b9f069f57defcc6f502d7030057f1def2fd0f22bbe",
+    "systemd/sentinel-guarded-autonomy.timer": "b483fb87563ce8e5515e80c9f9e775308ef332a5b3d4ebd0a1144256800e7acc"
+  }
+}

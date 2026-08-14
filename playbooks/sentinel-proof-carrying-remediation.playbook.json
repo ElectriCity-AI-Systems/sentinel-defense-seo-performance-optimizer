@@ -1,0 +1,23 @@
+{
+  "schema_version": "sentinel-playbook-1",
+  "playbook_id": "sentinel-proof-carrying-remediation",
+  "mode": "ENFORCEMENT_GATE_ONLY",
+  "purpose": "Require machine-verifiable proven cause, evidence, exact scope, policy, TTL, health, and rollback proofs before any registered LOW_LIVE candidate reaches an adapter commit.",
+  "phases": [
+    "build_prepare_proof",
+    "independent_prepare_verification",
+    "read_only_adapter_prepare",
+    "bind_before_hash_and_rollback_artifact",
+    "independent_commit_verification",
+    "existing_guarded_canary_and_validation"
+  ],
+  "required_outcomes": [
+    "PROOF_PREPARE_VERIFIED",
+    "PROOF_COMMIT_VERIFIED"
+  ],
+  "failure_outcome": "NO_ACTION",
+  "cause_proof_required": true,
+  "authority_expansion": false,
+  "live_apply_added": false,
+  "breach": false
+}

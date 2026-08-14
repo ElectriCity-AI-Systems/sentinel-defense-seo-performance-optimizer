@@ -1,6 +1,9 @@
 {
   "action_requirements": [
     "registered_action",
+    "proven_cause",
+    "exact_scope",
+    "independent_proof_verification",
     "two_phase_commit",
     "snapshot",
     "before_hash",
@@ -10,14 +13,14 @@
     "rollback",
     "audit"
   ],
-  "allowed_actions": [
+  "allowed_actions": [],
+  "review_only_contracts": [
     "temporary_scanner_managed_challenge_v1",
-    "temporary_wp_login_protection_v1",
-    "anonymous_microcache_canary_v1",
-    "rollback_sentinel_owned_rule_v1",
-    "restart_sentinel_owned_worker_v1"
+    "rollback_sentinel_owned_rule_v1"
   ],
+  "autonomous_waf_enabled": false,
+  "runtime_low_live_enabled": false,
   "default_decision": "BLOCK_UNREGISTERED",
   "name": "sentinel-low-live-actions",
-  "risk": "LOW_LIVE"
+  "risk": "LOW_LIVE_FAIL_CLOSED"
 }
