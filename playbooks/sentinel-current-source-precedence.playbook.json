@@ -19,8 +19,9 @@
   },
   "fixed_order": [
     "collect_current_inputs",
-    "evaluate_freshness",
+    "refresh_recovery_evidence",
     "build_canonical_truth",
+    "evaluate_freshness",
     "validate_canonical_invariants",
     "determine_owner_priority",
     "build_master_report",
@@ -86,13 +87,17 @@
       "legacy_scheduler_plan": "reports/latest/safe-draft-autonomy-scheduler-plan.json",
       "legacy_sourcemap": "reports/latest/sourcemap-prevention-report.json",
       "legacy_timer_draft": "reports/latest/safe-draft-autonomy-timer-draft-report.json",
+      "nowplaying_recovery": "reports/latest/sentinel-nowplaying-recovery.json",
       "scheduler_verification": "state/guarded-autonomy/scheduler-verification.json"
     },
     "nowplaying": {
-      "primary": "reports/latest/sentinel-nowplaying-recovery.json"
+      "legacy_nowplaying": "reports/latest/sentinel-nowplaying-recovery.json",
+      "origin_504_recovery": "reports/latest/sentinel-504-recovery.json"
     },
     "origin": {
-      "primary": "reports/latest/sentinel-origin-failure-diagnostics.json"
+      "origin_504_recovery": "reports/latest/sentinel-504-recovery.json",
+      "primary": "reports/latest/sentinel-origin-failure-diagnostics.json",
+      "route_map": "reports/latest/sentinel-origin-route-map.json"
     },
     "pipeline": {
       "primary": "reports/latest/sentinel-production-pipeline.json"

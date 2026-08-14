@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import sentinel_canonical_invariants as invariants
 import sentinel_canonical_truth as canonical_truth
+import sentinel_monitoring_decision_engine as monitoring_decision
 
 
 PROJECT_DIR = Path("/srv/sentinel-defense")
@@ -82,8 +83,9 @@ UNKNOWN = canonical_truth.UNKNOWN
 
 PIPELINE_STEPS = (
     "collect_current_inputs",
-    "evaluate_freshness",
+    "refresh_recovery_evidence",
     "build_canonical_truth",
+    "evaluate_freshness",
     "validate_canonical_invariants",
     "determine_owner_priority",
     "build_master_report",
@@ -285,6 +287,12 @@ def collect_website_snapshot(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "current_growth": value("current_growth", UNKNOWN),
         "nowplaying_classification": value("nowplaying_classification", UNKNOWN),
         "nowplaying_automatic_repair_allowed": value("nowplaying_automatic_repair_allowed"),
+        "recovery_evidence_window_status": value("recovery_evidence_window_status", UNKNOWN),
+        "recovery_snapshot_id": value("recovery_snapshot_id"),
+        "autonomous_monitoring_decision": value("autonomous_monitoring_decision", UNKNOWN),
+        "dominant_504_endpoint": value("dominant_504_endpoint"),
+        "dominant_504_share_percent": value("dominant_504_share_percent"),
+        "primary_failure_focus": value("primary_failure_focus", UNKNOWN),
     }
 
 
@@ -380,8 +388,11 @@ def build_freshness_report(canonical_report: Dict[str, Any]) -> Dict[str, Any]:
 # Step 3 — canonical truth
 # --------------------------------------------------------------------------- #
 
-def build_canonical_truth() -> Dict[str, Any]:
-    report = canonical_truth.build_canonical_truth()
+def build_canonical_truth(refresh_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    report = canonical_truth.build_canonical_truth(
+        refresh_result=refresh_result,
+        refresh_recovery=refresh_result is None,
+    )
     canonical_truth.persist(report)
     return report
 
@@ -550,11 +561,17 @@ def run_pipeline(build_master: bool = True) -> Dict[str, Any]:
     # Step 1 — collect current inputs.
     inputs = collect_current_inputs()
 
+    # Step 2 — refresh Phase 10.22 recovery against one current monitor
+    # snapshot. Mixed windows fail closed before canonical truth.
+    recovery_refresh = monitoring_decision.refresh_before_canonical(
+        force=False, persist_outputs=True
+    )
+
     # Step 3 must not be preceded by any summary rendering: canonical truth first.
-    canonical_report = build_canonical_truth()
+    canonical_report = build_canonical_truth(recovery_refresh)
     canonical = canonical_report.get("canonical", {})
 
-    # Step 2 — freshness, as evaluated by the canonical resolver.
+    # Step 4 — freshness, as evaluated by the canonical resolver.
     freshness = build_freshness_report(canonical_report)
 
     # Step 4 — canonical invariants (pre-master gate).
@@ -584,6 +601,11 @@ def run_pipeline(build_master: bool = True) -> Dict[str, Any]:
         "canonical_truth_status": canonical_report.get("status"),
         "canonical_truth_generated_at": canonical_report.get("generated_at_utc"),
         "canonical_missing_fields": canonical_report.get("missing_fields", []),
+        "recovery_evidence_refresh": {
+            "status": recovery_refresh.get("refresh_status"),
+            "evidence_window": recovery_refresh.get("evidence_window"),
+            "autonomous_decision": recovery_refresh.get("autonomous_decision"),
+        },
         "inputs": inputs,
         "website": website,
         "local": local,
@@ -630,7 +652,9 @@ def run_pipeline(build_master: bool = True) -> Dict[str, Any]:
         "mismatched_fields": post_daily["mismatched_fields"],
     }
 
-    if canonical_report.get("status") != "CANONICAL_TRUTH_OK":
+    if recovery_refresh.get("evidence_window", {}).get("status") != monitoring_decision.EVIDENCE_WINDOW_ALIGNED:
+        report["status"] = "PRODUCTION_PIPELINE_EVIDENCE_WINDOW_MISMATCH"
+    elif canonical_report.get("status") != "CANONICAL_TRUTH_OK":
         report["status"] = "PRODUCTION_PIPELINE_CANONICAL_TRUTH_INCOMPLETE"
     elif post_invariants["violations"]:
         report["status"] = "PRODUCTION_PIPELINE_INVARIANT_VIOLATION"

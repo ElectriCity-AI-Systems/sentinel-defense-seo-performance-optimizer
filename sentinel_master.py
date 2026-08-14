@@ -3555,6 +3555,12 @@ CANONICAL_HEADER_FIELDS = (
     "rolling_window_status",
     "current_snapshot_id",
     "current_growth",
+    "recovery_evidence_window_status",
+    "recovery_snapshot_id",
+    "autonomous_monitoring_decision",
+    "dominant_504_endpoint",
+    "dominant_504_share_percent",
+    "primary_failure_focus",
 )
 
 
@@ -3608,6 +3614,8 @@ def canonical_truth_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
         "unresolved_fields": counts.get("unresolved_fields"),
         "current_sources": counts.get("current_sources"),
         "stale_excluded_sources": counts.get("stale_excluded_sources"),
+        "recovery_evidence_refresh": snapshot.get("recovery_evidence_refresh", {}),
+        "evidence_window": snapshot.get("evidence_window", {}),
         "precedence": snapshot.get("precedence", []),
     }
 
@@ -5565,8 +5573,13 @@ def build_report(
         "safe_sftp_seo_apply_lane": safe_sftp_lane_summary,
         "production_pipeline_status": production_pipeline_data.get("status") if production_pipeline_exists and isinstance(production_pipeline_data, dict) else "NOT_AVAILABLE",
         "production_pipeline": production_pipeline_data if production_pipeline_exists and isinstance(production_pipeline_data, dict) else {"present": False},
-        "nowplaying_recovery_status": nowplaying_recovery_data.get("status") if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else "NOT_AVAILABLE",
-        "nowplaying_recovery": nowplaying_recovery_data if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else {"present": False},
+        "legacy_nowplaying_recovery_status": nowplaying_recovery_data.get("status") if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else "NOT_AVAILABLE",
+        "legacy_nowplaying_recovery": {
+            **(nowplaying_recovery_data if nowplaying_recovery_exists and isinstance(nowplaying_recovery_data, dict) else {"present": False}),
+            "source_class": "LEGACY_DIAGNOSTIC",
+            "superseded": True,
+            "operational_effect": False,
+        },
         "canonical_truth_status": canonical_truth_snapshot.get("status", "NOT_AVAILABLE"),
         "canonical_truth": canonical_truth_summary(canonical_truth_snapshot),
         "canonical_header": canonical_header,
@@ -7919,6 +7932,12 @@ def render_canonical_runtime_section(
         "emergency_stop",
         "breach",
         "owner_priority",
+        "recovery_evidence_window_status",
+        "recovery_snapshot_id",
+        "autonomous_monitoring_decision",
+        "dominant_504_endpoint",
+        "dominant_504_share_percent",
+        "primary_failure_focus",
     ):
         lines.append(
             f"| `{field}` | {md_status(canonical_cell(header, field))} | "
@@ -8074,6 +8093,13 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"- Owner Priority: {canonical_row('owner_priority')}",
         f"- Owner Priority Rank: {md_status(canonical_header.get('owner_priority_rank'))}",
         f"- Owner Priority Reason: {safe_text(canonical_header.get('owner_priority_reason'))}",
+        f"- Recovery Evidence Window: {canonical_row('recovery_evidence_window_status')}",
+        f"- Website/Recovery Snapshot: {canonical_row('current_snapshot_id')} / "
+        f"{canonical_row('recovery_snapshot_id')}",
+        f"- Autonomous Monitoring Decision: {canonical_row('autonomous_monitoring_decision')}",
+        f"- Primary Failure Focus: {canonical_row('primary_failure_focus')}",
+        f"- Dominant 504 Endpoint: {canonical_row('dominant_504_endpoint')} "
+        f"({canonical_row('dominant_504_share_percent')}%)",
         "",
         "Legacy Level-1 modules never provide these values. Historical results are listed "
         "separately under `Legacy / Historical Modules`.",
@@ -8108,6 +8134,13 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Canonical Write Canary | {canonical_row('write_canary_status')} |",
         f"| Canonical Promotion | {canonical_row('promotion_status')} |",
         f"| Canonical Owner Priority | {canonical_row('owner_priority')} |",
+        f"| Canonical Recovery Evidence Window | {canonical_row('recovery_evidence_window_status')} |",
+        f"| Canonical Website Snapshot | {canonical_row('current_snapshot_id')} |",
+        f"| Canonical Recovery Snapshot | {canonical_row('recovery_snapshot_id')} |",
+        f"| Canonical Monitoring Decision | {canonical_row('autonomous_monitoring_decision')} |",
+        f"| Canonical Primary Failure Focus | {canonical_row('primary_failure_focus')} |",
+        f"| Canonical Dominant 504 Endpoint | {canonical_row('dominant_504_endpoint')} |",
+        f"| Canonical Dominant 504 Share Percent | {canonical_row('dominant_504_share_percent')} |",
         f"| Canonical Total 5xx (24h) | {canonical_row('total_5xx')} |",
         f"| Canonical NowPlaying 504 (24h) | {canonical_row('nowplaying_504')} |",
         f"| Canonical NowPlaying Classification | {canonical_row('nowplaying_classification')} |",
@@ -8365,9 +8398,9 @@ def render_markdown(report: Dict[str, Any]) -> str:
     lines.extend(render_concrete_seo_performance_optimizer(report.get("concrete_seo_performance_optimizer", {}) if isinstance(report.get("concrete_seo_performance_optimizer"), dict) else {}))
     lines.extend(render_safe_sftp_seo_apply_lane(report.get("safe_sftp_seo_apply_lane", {}) if isinstance(report.get("safe_sftp_seo_apply_lane"), dict) else {}))
 
-    # Production Pipeline and NowPlaying Recovery (Phase 10.20)
+    # Production Pipeline and explicitly superseded NowPlaying Recovery (Phase 10.20)
     pipeline = report.get("production_pipeline") if isinstance(report.get("production_pipeline"), dict) else {}
-    nowplaying = report.get("nowplaying_recovery") if isinstance(report.get("nowplaying_recovery"), dict) else {}
+    nowplaying = report.get("legacy_nowplaying_recovery") if isinstance(report.get("legacy_nowplaying_recovery"), dict) else {}
     lines.extend([
         "## Production Pipeline (Phase 10.20)",
         "",
@@ -8379,12 +8412,14 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"- Emergency stop: `{str(pipeline.get('runtime', {}).get('emergency_stop', True)).lower()}`",
         f"- Breach: `{str(pipeline.get('runtime', {}).get('breach', False)).lower()}`",
         "",
-        "## NowPlaying Recovery (Phase 10.20)",
+        "## Legacy / Superseded NowPlaying Recovery (Phase 10.20)",
         "",
-        f"- Recovery status: `{md_status(nowplaying.get('status'))}`",
-        f"- Classification: `{md_status(nowplaying.get('classification', {}).get('classification'))}`",
-        f"- Automatic repair allowed: `{str(nowplaying.get('classification', {}).get('automatic_repair_allowed', False)).lower()}`",
-        f"- Repair applied: `{str(nowplaying.get('repair_applied', False)).lower()}`",
+        f"- Legacy recovery status: `{md_status(nowplaying.get('status'))}`",
+        f"- Legacy classification: `{md_status(nowplaying.get('classification', {}).get('classification'))}`",
+        f"- Legacy automatic repair allowed: `{str(nowplaying.get('classification', {}).get('automatic_repair_allowed', False)).lower()}`",
+        f"- Legacy repair applied: `{str(nowplaying.get('repair_applied', False)).lower()}`",
+        "- Superseded: `true`",
+        "- Operational effect: `false`",
         "",
     ])
 

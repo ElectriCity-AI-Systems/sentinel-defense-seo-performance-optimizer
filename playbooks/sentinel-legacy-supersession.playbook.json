@@ -67,6 +67,10 @@
   },
   "legacy_modules": [
     {
+      "description": "Historical NowPlaying route-mismatch classification, informational only.",
+      "source": "reports/latest/sentinel-nowplaying-recovery.json"
+    },
+    {
       "description": "Phase 1.5 autonomy policy report (LEVEL_1_DRAFT_ONLY era).",
       "source": "reports/latest/autonomy-policy-report.json"
     },

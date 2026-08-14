@@ -1,0 +1,29 @@
+{
+  "causality_rule": "a healthy point probe never proves the historical internal failure layer",
+  "decisions": [
+    "NO_ACTION",
+    "MONITOR_CONTINUE",
+    "OWNER_ACTION_REQUIRED"
+  ],
+  "fixed_endpoint": "/api/nowplaying/electri-city-ai-electro-radio",
+  "fixed_host": "ai-radio.electri-c-ity-studios-24-7.com",
+  "forbidden": [
+    "Cloudflare write",
+    "DNS change",
+    "TLS change",
+    "WAF change",
+    "WordPress write",
+    "database write",
+    "global nginx change",
+    "timeout change",
+    "credential search",
+    "unverified SSH",
+    "LOW_LIVE activation",
+    "MEDIUM execution",
+    "HIGH execution"
+  ],
+  "name": "sentinel-cloudflare-origin-correlation",
+  "read_only": true,
+  "schema_version": "sentinel-monitoring-decision-engine-10.23",
+  "status": "PLAYBOOK_ACTIVE"
+}

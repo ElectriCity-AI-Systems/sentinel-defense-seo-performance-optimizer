@@ -31,6 +31,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+import sentinel_monitoring_decision_engine as monitoring_decision
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 SCHEMA_VERSION = "sentinel-guarded-autonomy-10.19"
@@ -2412,6 +2414,7 @@ def audit_record(
         "risk": action.get("risk") if action else None,
         "policy_match": bool(action and action.get("owner_policy_reference") == OWNER_POLICY_REFERENCE),
         "preflight_result": results.get("preflight_result"),
+        "monitoring_decision": results.get("monitoring_decision"),
         "decision": decision,
         "reason": reason,
         "canary_result": results.get("canary_result"),
@@ -2739,6 +2742,7 @@ def run_cycle() -> Dict[str, Any]:
         if state.get("first_cycle_id") is None:
             state["first_cycle_id"] = cycle_id
         staged_health: Optional[Dict[str, Any]] = None
+        monitoring_observation: Optional[Dict[str, Any]] = None
         if state.get("activation_stage") in {
             "LEVEL_2_MONITORING_ACTIVE",
             "LEVEL_2_SCHEDULER_VERIFICATION",
@@ -2747,6 +2751,20 @@ def run_cycle() -> Dict[str, Any]:
         }:
             staged_health = check_fixed_health_targets()
             write_json(HEALTH_BASELINE_STATE_JSON, staged_health)
+        if state.get("activation_stage") == "LEVEL_2_MONITORING_ACTIVE":
+            try:
+                monitoring_observation = monitoring_decision.run_monitoring_cycle(force=False)
+            except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+                monitoring_observation = {
+                    "status": "MONITORING_DECISION_EVIDENCE_WINDOW_BLOCKED",
+                    "autonomous_decision": {
+                        "decision": "OWNER_ACTION_REQUIRED",
+                        "execution": "NO_ACTION",
+                        "next_read_only_diagnostic": "REFRESH_AND_ALIGN_EVIDENCE_WINDOW",
+                        "reason": f"Monitoring evidence refresh failed closed: {type(exc).__name__}.",
+                    },
+                    "breach": False,
+                }
         signals = current_signals()
         selected = decide(signals)
         circuit = load_circuit()
@@ -2831,7 +2849,15 @@ def run_cycle() -> Dict[str, Any]:
             if state.get("activation_stage") == "LEVEL_2_SCHEDULER_VERIFICATION":
                 reason = "Scheduler verification cycle completed with live application disabled."
             elif state.get("activation_stage") == "LEVEL_2_MONITORING_ACTIVE":
-                reason = "Monitoring-only cycle completed with productive application locked."
+                autonomous = (
+                    monitoring_observation.get("autonomous_decision", {})
+                    if isinstance(monitoring_observation, dict) else {}
+                )
+                decision = autonomous.get("decision") or "MONITOR_CONTINUE"
+                reason = autonomous.get("reason") or (
+                    "Monitoring-only cycle completed with productive application locked."
+                )
+                candidate = None
             else:
                 reason = "Runtime is not ACTIVE; local monitoring and audit remain enabled."
         elif circuit_view["tripped"]:
@@ -2943,6 +2969,7 @@ def run_cycle() -> Dict[str, Any]:
             decision,
             reason,
             preflight_result=state.get("preflight", {}).get("status"),
+            monitoring_decision=(monitoring_observation or {}).get("autonomous_decision"),
             canary_result=canary_result,
             apply_result=apply_result,
             validation_result=validation_result,
@@ -2959,6 +2986,9 @@ def run_cycle() -> Dict[str, Any]:
             "execution": execution,
             "reason": reason,
             "healthcheck": validation_result or {"status": "NOT_RUN"},
+            "monitoring_decision": (monitoring_observation or {}).get(
+                "autonomous_decision", {"status": "NOT_RUN"}
+            ),
             "circuit_breaker": circuit_view,
         }
         state["runtime_promotion"] = auto_promote_guarded_canary(state)

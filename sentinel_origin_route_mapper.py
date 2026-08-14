@@ -1390,7 +1390,7 @@ def build_all(include_origin_probes: bool = True) -> Dict[str, Any]:
     }
 
 
-def persist(bundle: Dict[str, Any]) -> None:
+def persist(bundle: Dict[str, Any], write_playbooks: bool = True) -> None:
     ensure_dirs()
     write_json(OWNERSHIP_JSON, bundle["ownership"])
     write_text(OWNERSHIP_MD, render_ownership(bundle["ownership"]))
@@ -1400,8 +1400,9 @@ def persist(bundle: Dict[str, Any]) -> None:
     write_text(ROUTE_MAP_MD, render_route_map(bundle["route_map"]))
     write_json(NOWPLAYING_CHAIN_JSON, bundle["nowplaying_chain"])
     write_text(NOWPLAYING_CHAIN_MD, render_nowplaying_chain(bundle["nowplaying_chain"]))
-    for path in PLAYBOOKS:
-        write_json(path, build_playbook())
+    if write_playbooks:
+        for path in PLAYBOOKS:
+            write_json(path, build_playbook())
 
     chain = bundle["nowplaying_chain"]
     state = {

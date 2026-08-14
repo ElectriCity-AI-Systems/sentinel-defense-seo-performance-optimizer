@@ -65,6 +65,9 @@ COMMANDS = {
     "runtime-monitoring": ["python3", "sentinel_guarded_runtime_activation.py", "--activate-monitoring"],
     "runtime-write-canary": ["python3", "sentinel_guarded_runtime_activation.py", "--probe-write-canary"],
     "runtime-level": ["python3", "sentinel_guarded_runtime_activation.py", "--status"],
+    "monitoring-decision": ["python3", "sentinel_monitoring_decision_engine.py", "--status"],
+    "recovery-refresh": ["python3", "sentinel_monitoring_decision_engine.py", "--refresh-recovery"],
+    "nowplaying-correlation": ["python3", "sentinel_monitoring_decision_engine.py", "--correlate-nowplaying"],
 }
 
 

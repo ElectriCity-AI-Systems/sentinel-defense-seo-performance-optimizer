@@ -849,7 +849,12 @@ def build_failure_budget(baseline: Dict[str, Any], endpoint_path: str) -> Dict[s
 
 
 def primary_failure_focus(baseline: Dict[str, Any], repairability: Dict[str, Any]) -> Dict[str, Any]:
-    """Rank by current new-error contribution first, not by the 24h total alone."""
+    """Rank fresh growth first, then the largest current 504 contribution.
+
+    A small endpoint with a high failure ratio must not displace the route that
+    contributes most of the current failures when both have the same observed
+    short-window growth.  This was the Phase 10.22 tie-break regression.
+    """
     candidates: List[Dict[str, Any]] = []
     for path, endpoint in baseline.get("endpoints", {}).items():
         rate_15m = endpoint.get("rates", {}).get("15m", {})
@@ -870,8 +875,9 @@ def primary_failure_focus(baseline: Dict[str, Any], repairability: Dict[str, Any
         candidates,
         key=lambda row: (
             -row["new_errors_lower_bound_15m"],
-            -row["failure_ratio_percent"],
             -row["current_504"],
+            -row["failure_ratio_percent"],
+            -row["requests_24h"],
             not row["safely_repairable"],
         ),
     )
@@ -886,8 +892,9 @@ def primary_failure_focus(baseline: Dict[str, Any], repairability: Dict[str, Any
         "endpoint": top.get("endpoint"),
         "ranking_basis": [
             "largest current new error contribution",
-            "highest 504 failure ratio",
-            "largest confirmed user impact",
+            "largest current 504 contribution when growth ties",
+            "highest 504 failure ratio when volume ties",
+            "largest request volume when failure metrics tie",
             "safely repairable cause",
         ],
         "ranked": ranked[:5],
@@ -1174,7 +1181,10 @@ def counterfactual(dominant: Dict[str, Any], gate: Dict[str, Any]) -> Dict[str, 
 # Assembly
 # --------------------------------------------------------------------------- #
 
-def build_recovery(persist_outputs: bool = True) -> Dict[str, Any]:
+def build_recovery(
+    persist_outputs: bool = True,
+    write_playbooks: bool = True,
+) -> Dict[str, Any]:
     ensure_dirs()
     baseline = build_baseline()
     route_map = load_dict(route_mapper.ROUTE_MAP_JSON)
@@ -1242,6 +1252,7 @@ def build_recovery(persist_outputs: bool = True) -> Dict[str, Any]:
             "origin_local_to_sentinel_host": chain.get("origin_local_to_sentinel_host"),
             "cache_layer_verdict": chain.get("cache_layer", {}).get("verdict"),
             "repairability": chain.get("repairability"),
+            "automatic_repair_allowed": chain.get("automatic_repair_allowed", False),
         },
         "users_me": {
             "primary_classification": users_me.get("primary_classification"),
@@ -1260,7 +1271,15 @@ def build_recovery(persist_outputs: bool = True) -> Dict[str, Any]:
     }
 
     if persist_outputs:
-        persist(recovery, baseline, graph, repairability, users_me, effect)
+        persist(
+            recovery,
+            baseline,
+            graph,
+            repairability,
+            users_me,
+            effect,
+            write_playbooks=write_playbooks,
+        )
     return recovery
 
 
@@ -1286,6 +1305,7 @@ def persist(
     repairability: Dict[str, Any],
     users_me: Dict[str, Any],
     effect: Dict[str, Any],
+    write_playbooks: bool = True,
 ) -> None:
     write_json(BASELINE_JSON, baseline)
     write_text(BASELINE_MD, render_baseline(baseline))
@@ -1300,8 +1320,9 @@ def persist(
     write_json(EFFECT_JSON, effect)
     write_text(EFFECT_MD, render_effect(effect))
     write_text(OWNER_SUMMARY_MD, render_owner_summary(recovery))
-    for name, kind in PLAYBOOKS.items():
-        write_json(PLAYBOOK_DIR / name, build_playbook(kind))
+    if write_playbooks:
+        for name, kind in PLAYBOOKS.items():
+            write_json(PLAYBOOK_DIR / name, build_playbook(kind))
 
     state = {
         "schema_version": SCHEMA_VERSION,
@@ -1967,6 +1988,26 @@ def run_self_test() -> Dict[str, Any]:
         {"endpoints": []},
     )
     checks["focus_prefers_current_production"] = focus["endpoint"] == NOWPLAYING_PATH
+
+    # Phase 10.22.2 regression: equal fresh growth is resolved by absolute
+    # current 504 contribution before a small endpoint's failure ratio.
+    tie_focus = primary_failure_focus(
+        {"endpoints": {
+            NOWPLAYING_PATH: {
+                "count_504": 762, "requests_24h": 1534, "failure_ratio_percent": 49.67,
+                "rates": {"15m": {"new_errors_lower_bound": 0}},
+            },
+            WP_USERS_ME_PATH: {
+                "count_504": 8, "requests_24h": 14, "failure_ratio_percent": 57.14,
+                "rates": {"15m": {"new_errors_lower_bound": 0}},
+            },
+        }},
+        {"endpoints": []},
+    )
+    checks["phase_10_22_tie_prefers_dominant_volume"] = (
+        tie_focus["endpoint"] == NOWPLAYING_PATH
+        and tie_focus["primary_failure_focus"] == "AI_RADIO_NOWPLAYING_RECOVERY"
+    )
 
     # Structural safety.
     source_text = Path(__file__).read_text(encoding="utf-8")

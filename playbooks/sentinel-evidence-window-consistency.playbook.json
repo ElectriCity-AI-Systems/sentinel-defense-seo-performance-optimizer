@@ -1,0 +1,32 @@
+{
+  "contract": [
+    "latest_monitor_snapshot == website_report_snapshot",
+    "website_report_snapshot == origin_matrix_snapshot",
+    "origin_matrix_snapshot == recovery_baseline_snapshot"
+  ],
+  "decisions": [
+    "NO_ACTION",
+    "MONITOR_CONTINUE",
+    "OWNER_ACTION_REQUIRED"
+  ],
+  "forbidden": [
+    "Cloudflare write",
+    "DNS change",
+    "TLS change",
+    "WAF change",
+    "WordPress write",
+    "database write",
+    "global nginx change",
+    "timeout change",
+    "credential search",
+    "unverified SSH",
+    "LOW_LIVE activation",
+    "MEDIUM execution",
+    "HIGH execution"
+  ],
+  "mismatch_status": "EVIDENCE_WINDOW_MISMATCH",
+  "name": "sentinel-evidence-window-consistency",
+  "read_only": true,
+  "schema_version": "sentinel-monitoring-decision-engine-10.23",
+  "status": "PLAYBOOK_ACTIVE"
+}

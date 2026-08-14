@@ -19,8 +19,9 @@
   },
   "fixed_order": [
     "collect_current_inputs",
-    "evaluate_freshness",
+    "refresh_recovery_evidence",
     "build_canonical_truth",
+    "evaluate_freshness",
     "validate_canonical_invariants",
     "determine_owner_priority",
     "build_master_report",

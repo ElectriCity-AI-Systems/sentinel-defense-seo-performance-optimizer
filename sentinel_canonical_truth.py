@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+import sentinel_monitoring_decision_engine as monitoring_decision
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 SCHEMA_VERSION = "sentinel-canonical-truth-10.21"
@@ -343,15 +345,17 @@ SOURCE_LIST: Tuple[Source, ...] = (
         "route_map",
         "Origin route map from authoritative Cloudflare DNS plus edge and origin probes.",
     ),
-    # Tier 6 — current recovery modules
+    # The Phase 10.20 report is historical. It may remain auditable but must
+    # never replace refreshed Phase 10.22 evidence in current truth.
     Source(
         "nowplaying_recovery",
         REPORT_DIR / "sentinel-nowplaying-recovery.json",
-        CLASS_RECOVERY,
-        KIND_STATE_OF_RECORD,
-        "primary",
-        "NowPlaying recovery classification (route mismatch, repair permission).",
+        CLASS_LEGACY,
+        KIND_LEGACY_DIAGNOSTIC,
+        "legacy_nowplaying",
+        "Historical NowPlaying route-mismatch classification, informational only.",
     ),
+    # Tier 6 — current recovery module
     Source(
         "origin_504_recovery",
         REPORT_DIR / "sentinel-504-recovery.json",
@@ -462,8 +466,8 @@ def canonical_source_registry() -> Dict[str, Any]:
         "scheduler": group("scheduler_cycles", "scheduler_verification"),
         "pipeline": group("production_pipeline"),
         "website": group("website", "local"),
-        "origin": group("origin_diagnostics"),
-        "nowplaying": group("nowplaying_recovery"),
+        "origin": group("origin_diagnostics", "origin_route_map", "origin_504_recovery"),
+        "nowplaying": group("origin_504_recovery", "nowplaying_recovery"),
         "consistency": group("consistency"),
         "legacy": {
             SOURCES[source_id].source_id: rel(SOURCES[source_id].path)
@@ -961,16 +965,15 @@ DIAGNOSTIC_FIELDS: Dict[str, List[Candidate]] = {
         cand("origin_diagnostics", "wp_users_me_diagnostic.classification"),
     ],
     "nowplaying_classification": [
-        # Phase 10.22 evidence-guided recovery is authoritative when available.
-        # The older Phase 10.20 NowPlaying recovery remains a legacy fallback only.
+        # Phase 10.22 evidence-guided recovery is the only current source. The
+        # older route-mismatch report is retained as legacy but never selected.
         cand("origin_504_recovery", "nowplaying_chain.failure_class"),
-        cand("nowplaying_recovery", "classification.classification", allow_stale=True),
     ],
     "nowplaying_automatic_repair_allowed": [
-        cand("nowplaying_recovery", "classification.automatic_repair_allowed", allow_stale=True),
+        cand("origin_504_recovery", "nowplaying_chain.automatic_repair_allowed"),
     ],
     "nowplaying_repair_applied": [
-        cand("nowplaying_recovery", "repair_applied", allow_stale=True),
+        cand("origin_504_recovery", "effect.repair_applied"),
     ],
     "consistency_status": [cand("consistency", "status")],
     # Phase 10.22 — evidence-guided origin recovery
@@ -1649,12 +1652,93 @@ def assemble_canonical(
     }
 
 
-def build_canonical_truth() -> Dict[str, Any]:
+def enforce_evidence_window(
+    loaded: Dict[str, Dict[str, Any]], refresh_result: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Fail closed when website, route and recovery snapshots are mixed."""
+    window = refresh_result.get("evidence_window") if isinstance(refresh_result, dict) else None
+    status = (
+        window.get("status")
+        if isinstance(window, dict)
+        else monitoring_decision.EVIDENCE_WINDOW_MISMATCH
+    )
+    if status == monitoring_decision.EVIDENCE_WINDOW_ALIGNED:
+        return {
+            "status": status,
+            "excluded_sources": [],
+            "reason": window.get("reason"),
+        }
+
+    excluded: List[str] = []
+    for source_id in ("website", "origin_route_map", "origin_504_recovery"):
+        row = loaded.get(source_id)
+        if not isinstance(row, dict):
+            continue
+        row["freshness"] = STALE_EXCLUDED
+        row["usable_as_canonical_input"] = False
+        row["evidence_window_status"] = monitoring_decision.EVIDENCE_WINDOW_MISMATCH
+        row["reason"] = (
+            "EVIDENCE_WINDOW_MISMATCH: current website, route and recovery snapshot IDs are not identical."
+        )
+        excluded.append(source_id)
+    return {
+        "status": monitoring_decision.EVIDENCE_WINDOW_MISMATCH,
+        "excluded_sources": excluded,
+        "reason": (
+            window.get("reason") if isinstance(window, dict)
+            else "Recovery refresh did not provide a valid evidence-window contract."
+        ),
+    }
+
+
+def build_canonical_truth(
+    refresh_result: Optional[Dict[str, Any]] = None,
+    refresh_recovery: bool = True,
+) -> Dict[str, Any]:
+    if refresh_result is None:
+        if refresh_recovery:
+            refresh_result = monitoring_decision.refresh_before_canonical(
+                force=False, persist_outputs=True
+            )
+        else:
+            refresh_result = {
+                "status": "RECOVERY_EVIDENCE_REFRESH_NOT_RUN",
+                "evidence_window": {
+                    "status": monitoring_decision.EVIDENCE_WINDOW_MISMATCH
+                },
+            }
     as_of = datetime.now(timezone.utc)
     loaded = load_sources(as_of)
+    evidence_window = enforce_evidence_window(loaded, refresh_result)
     fields = resolve_fields(loaded)
     generated_at = utc_now()
     canonical = assemble_canonical(fields, generated_at)
+    decision = refresh_result.get("autonomous_decision", {})
+    refresh_window = refresh_result.get("evidence_window", {})
+    canonical["recovery_evidence_window_status"] = {
+        **derived_provenance(
+            evidence_window["status"],
+            ["current_snapshot_id", "dominant_504_endpoint"],
+            "Snapshot identity contract evaluated before canonical resolution.",
+        ),
+        "generated_at": generated_at,
+    }
+    canonical["recovery_snapshot_id"] = {
+        **derived_provenance(
+            refresh_window.get("snapshot_ids", {}).get("recovery_baseline_snapshot"),
+            ["recovery_evidence_window_status"],
+            "Phase 10.22 recovery baseline snapshot accepted by the evidence-window gate.",
+        ),
+        "generated_at": generated_at,
+    }
+    canonical["autonomous_monitoring_decision"] = {
+        **derived_provenance(
+            decision.get("decision") or UNKNOWN,
+            ["recovery_evidence_window_status", "primary_failure_focus"],
+            "Read-only Level-2 monitoring decision; never a productive apply instruction.",
+        ),
+        "generated_at": generated_at,
+    }
     owner_priority = canonical["owner_priority"]
     legacy = build_legacy_supersession(fields, loaded, owner_priority)
 
@@ -1668,7 +1752,10 @@ def build_canonical_truth() -> Dict[str, Any]:
         missing_fields.append("runtime_status")
     missing_fields = sorted(set(missing_fields))
 
-    status = "CANONICAL_TRUTH_OK" if not missing_fields else "CANONICAL_TRUTH_INCOMPLETE"
+    if evidence_window["status"] != monitoring_decision.EVIDENCE_WINDOW_ALIGNED:
+        status = "CANONICAL_TRUTH_EVIDENCE_WINDOW_MISMATCH"
+    else:
+        status = "CANONICAL_TRUTH_OK" if not missing_fields else "CANONICAL_TRUTH_INCOMPLETE"
 
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -1676,6 +1763,13 @@ def build_canonical_truth() -> Dict[str, Any]:
         "status": status,
         "report_classification": REPORT_CLASSIFICATION,
         "execution_boundaries": EXECUTION_BOUNDARIES,
+        "recovery_evidence_refresh": {
+            "status": refresh_result.get("refresh_status") or refresh_result.get("status"),
+            "evidence_window": refresh_result.get("evidence_window"),
+            "autonomous_decision": decision,
+            "productive_change_attempted": False,
+        },
+        "evidence_window": evidence_window,
         "resolver_role": "resolver_only_no_new_runtime_state_machine",
         "precedence": [
             {"tier": tier, "source_class": name, "description": description}
@@ -1939,6 +2033,9 @@ def build_daily_summary_blocks(report: Dict[str, Any]) -> Dict[str, Any]:
         f"Dominant 504 origin: {show(c('dominant_504_origin'))}",
         f"Origin recovery: {show(c('origin_recovery_status'))}",
         f"504 repairability: {show(c('origin_504_repairability'))}",
+        f"Recovery evidence window: {show(c('recovery_evidence_window_status'))}",
+        f"Recovery snapshot: {show(c('recovery_snapshot_id'))}",
+        f"Autonomous monitoring decision: {show(c('autonomous_monitoring_decision'))}",
     ]
 
     return {
@@ -2242,6 +2339,9 @@ def persist(report: Dict[str, Any]) -> None:
         "wp_users_me_504": canonical["wp_users_me_504"].get("value"),
         "source_map_404": canonical["source_map_404"].get("value"),
         "rolling_window_status": canonical["rolling_window_status"].get("value"),
+        "recovery_evidence_window_status": canonical["recovery_evidence_window_status"].get("value"),
+        "recovery_snapshot_id": canonical["recovery_snapshot_id"].get("value"),
+        "autonomous_monitoring_decision": canonical["autonomous_monitoring_decision"].get("value"),
         "missing_fields": report["missing_fields"],
     }
     write_json(STATE_JSON, state)
@@ -2270,6 +2370,9 @@ def persist(report: Dict[str, Any]) -> None:
         "emergency_stop": state["emergency_stop"],
         "breach": state["breach"],
         "owner_priority": state["owner_priority"],
+        "recovery_evidence_window_status": state["recovery_evidence_window_status"],
+        "recovery_snapshot_id": state["recovery_snapshot_id"],
+        "autonomous_monitoring_decision": state["autonomous_monitoring_decision"],
         "missing_fields": report["missing_fields"],
     })
 
@@ -2290,15 +2393,27 @@ SNAPSHOT_MAX_AGE_SECONDS = 10 * 60
 def load_or_resolve(max_age_seconds: int = SNAPSHOT_MAX_AGE_SECONDS) -> Dict[str, Any]:
     """Current canonical snapshot for reports that run on their own timer.
 
-    Returns the persisted snapshot while it is young enough, otherwise resolves a
-    fresh one in memory. Resolution is read-only and writes nothing, so the
-    canonical artifacts stay owned by the pipeline.
+    Returns a young persisted snapshot only while its aligned recovery snapshot
+    still equals the newest monitor snapshot.  Otherwise it runs the fixed,
+    read-only recovery refresh before resolving current truth.  Generated
+    reports/state remain local artifacts; no productive action is performed.
     """
     snapshot = load_canonical_truth()
     generated = parse_timestamp(snapshot.get("generated_at_utc")) if snapshot else None
     if snapshot and generated is not None:
         age = (datetime.now(timezone.utc) - generated).total_seconds()
-        if -300 <= age <= max_age_seconds:
+        window = snapshot.get("recovery_evidence_refresh", {}).get("evidence_window", {})
+        snapshot_ids = window.get("snapshot_ids", {}) if isinstance(window, dict) else {}
+        latest = monitoring_decision.latest_snapshot().get("snapshot_id")
+        persisted_is_aligned = (
+            window.get("status") == monitoring_decision.EVIDENCE_WINDOW_ALIGNED
+            and latest is not None
+            and snapshot_ids.get("latest_monitor_snapshot") == latest
+            and snapshot_ids.get("website_report_snapshot") == latest
+            and snapshot_ids.get("origin_matrix_snapshot") == latest
+            and snapshot_ids.get("recovery_baseline_snapshot") == latest
+        )
+        if -300 <= age <= max_age_seconds and persisted_is_aligned:
             snapshot["snapshot_origin"] = "PERSISTED_SNAPSHOT"
             snapshot["snapshot_age_seconds"] = round(max(0.0, age), 2)
             return snapshot
@@ -2636,6 +2751,13 @@ def run_self_test() -> Dict[str, Any]:
         value_of(recovery_fields, "nowplaying_classification")
         != "NOWPLAYING_ROUTE_MISMATCH"
     )
+    checks["test_d2_old_report_is_legacy_only"] = (
+        SOURCES["nowplaying_recovery"].source_class == CLASS_LEGACY
+        and all(
+            candidate.source_id != "nowplaying_recovery"
+            for candidate in DIAGNOSTIC_FIELDS["nowplaying_classification"]
+        )
+    )
     checks["test_d2_live_share_recalculated"] = (
         recovery_canonical["dominant_504_share_percent"]["value"] == 64.37
     )
@@ -2649,6 +2771,31 @@ def run_self_test() -> Dict[str, Any]:
         == "2026-08-13T10:00:00Z"
         and recovery_canonical["dominant_504_share_percent"]["derived_from"]
         == ["dominant_504_endpoint", "nowplaying_504", "http_504"]
+    )
+
+    mixed_loaded = _synthetic_sources(
+        website=recovery_website_payload,
+        origin_504_recovery={
+            "generated_at_utc": "2026-08-12T16:12:51Z",
+            "nowplaying_chain": {"failure_class": "NOWPLAYING_EVIDENCE_INSUFFICIENT"},
+            "dominant_504_endpoint": NOWPLAYING_PATH,
+        },
+        nowplaying_recovery={
+            "generated_at_utc": "2026-08-01T15:02:10Z",
+            "classification": {"classification": "NOWPLAYING_ROUTE_MISMATCH"},
+        },
+    )
+    mixed_gate = enforce_evidence_window(
+        mixed_loaded,
+        {"evidence_window": {"status": monitoring_decision.EVIDENCE_WINDOW_MISMATCH}},
+    )
+    mixed_fields = resolve_fields(mixed_loaded)
+    checks["test_d3_mixed_window_excluded"] = (
+        mixed_gate["status"] == monitoring_decision.EVIDENCE_WINDOW_MISMATCH
+        and mixed_loaded["origin_504_recovery"]["usable_as_canonical_input"] is False
+    )
+    checks["test_d3_legacy_route_mismatch_never_fallback"] = (
+        value_of(mixed_fields, "nowplaying_classification") is None
     )
 
     # Guard against silently treating NowPlaying as dominant forever.

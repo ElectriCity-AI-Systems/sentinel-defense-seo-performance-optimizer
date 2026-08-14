@@ -80,6 +80,13 @@ CURRENT_TRUTH_ROWS = {
     "Canonical Write Canary": "write_canary_status",
     "Canonical Promotion": "promotion_status",
     "Canonical Owner Priority": "owner_priority",
+    "Canonical Recovery Evidence Window": "recovery_evidence_window_status",
+    "Canonical Website Snapshot": "current_snapshot_id",
+    "Canonical Recovery Snapshot": "recovery_snapshot_id",
+    "Canonical Monitoring Decision": "autonomous_monitoring_decision",
+    "Canonical Primary Failure Focus": "primary_failure_focus",
+    "Canonical Dominant 504 Endpoint": "dominant_504_endpoint",
+    "Canonical Dominant 504 Share Percent": "dominant_504_share_percent",
     "Canonical Total 5xx (24h)": "total_5xx",
     "Canonical NowPlaying 504 (24h)": "nowplaying_504",
     "Canonical SourceMap 404 (24h)": "source_map_404",
@@ -340,6 +347,74 @@ def check_nowplaying_invariant(
     return findings
 
 
+def check_recovery_window_invariant(
+    canonical: Dict[str, Any],
+    observed: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Canonical, master and pipeline must carry one recovery snapshot truth."""
+    findings: List[Dict[str, Any]] = []
+    expected_window = canonical_value(canonical, "recovery_evidence_window_status")
+    website_snapshot = canonical_value(canonical, "current_snapshot_id")
+    recovery_snapshot = canonical_value(canonical, "recovery_snapshot_id")
+    if expected_window != "EVIDENCE_WINDOW_ALIGNED":
+        findings.append(finding(
+            "recovery_window", VIOLATION,
+            "Canonical recovery evidence window is not aligned; current recovery truth is blocked.",
+            expected_window, "EVIDENCE_WINDOW_ALIGNED", "canonical",
+        ))
+    if not website_snapshot or not recovery_snapshot:
+        findings.append(finding(
+            "recovery_window", VIOLATION,
+            "Canonical website or recovery snapshot identity is missing.",
+            recovery_snapshot, website_snapshot, "canonical",
+        ))
+    elif website_snapshot != recovery_snapshot:
+        findings.append(finding(
+            "recovery_window", VIOLATION,
+            "Canonical website and recovery snapshots are mixed.",
+            recovery_snapshot, website_snapshot, "canonical",
+        ))
+
+    fields = (
+        "recovery_evidence_window_status",
+        "current_snapshot_id",
+        "recovery_snapshot_id",
+        "autonomous_monitoring_decision",
+        "dominant_504_endpoint",
+        "dominant_504_share_percent",
+        "primary_failure_focus",
+        "nowplaying_classification",
+    )
+    for location in ("master", "pipeline"):
+        values = observed.get(location, {})
+        for field in fields:
+            expected = normalize(canonical_value(canonical, field))
+            seen = normalize(values.get(field))
+            if expected is None:
+                findings.append(finding(
+                    "recovery_window", NOT_EVALUATED,
+                    f"Canonical {field} is unresolved.", None, None, "canonical",
+                ))
+            elif seen is None:
+                findings.append(finding(
+                    "recovery_window", VIOLATION,
+                    f"{location} does not expose current recovery field {field}.",
+                    None, expected, location,
+                ))
+            elif seen != expected:
+                findings.append(finding(
+                    "recovery_window", VIOLATION,
+                    f"{location} reports {field}={seen} while canonical reports {expected}.",
+                    seen, expected, location,
+                ))
+            else:
+                findings.append(finding(
+                    "recovery_window", OK,
+                    f"{location} {field} matches canonical.", seen, expected, location,
+                ))
+    return findings
+
+
 def check_sourcemap_invariant(
     canonical: Dict[str, Any],
     observed: Dict[str, Dict[str, Any]],
@@ -500,6 +575,11 @@ def legacy_token_map(canonical: Dict[str, Any]) -> Dict[str, str]:
         tokens["LEVEL_1_DRAFT_ONLY"] = f"canonical runtime level is {autonomy}"
     if canonical_value(canonical, "timer_active") is True:
         tokens["not_installed"] = "canonical systemd timer is active"
+    classification = normalize(canonical_value(canonical, "nowplaying_classification"))
+    if classification and classification != "NOWPLAYING_ROUTE_MISMATCH":
+        tokens["NOWPLAYING_ROUTE_MISMATCH"] = (
+            f"canonical Phase-10.22 recovery classification is {classification}"
+        )
     return tokens
 
 
@@ -556,6 +636,14 @@ def check_forbidden_header_text(
                 f"{location} reports NowPlaying 504 as 0 while current evidence reports {nowplaying}.",
                 0, nowplaying, location,
             ))
+    current_share = canonical_value(canonical, "dominant_504_share_percent")
+    if current_share is not None and normalize(current_share) != "59.2":
+        if re.search(r"Dominant 504 endpoint[^\n]*\(59\.2%", header_text, re.IGNORECASE):
+            findings.append(finding(
+                "daily_header", VIOLATION,
+                f"{location} presents legacy dominant share 59.2% while current canonical share is {current_share}%.",
+                59.2, current_share, location,
+            ))
     if not findings:
         findings.append(finding(
             "daily_header", OK, f"{location} carries no superseded operational claim.",
@@ -589,6 +677,14 @@ def observed_from_master(master: Dict[str, Any]) -> Dict[str, Any]:
         "source_map_status": header.get("source_map_status"),
         "website_status": header.get("website_status"),
         "total_5xx": header.get("total_5xx"),
+        "current_snapshot_id": header.get("current_snapshot_id"),
+        "recovery_evidence_window_status": header.get("recovery_evidence_window_status"),
+        "recovery_snapshot_id": header.get("recovery_snapshot_id"),
+        "autonomous_monitoring_decision": header.get("autonomous_monitoring_decision"),
+        "dominant_504_endpoint": header.get("dominant_504_endpoint"),
+        "dominant_504_share_percent": header.get("dominant_504_share_percent"),
+        "primary_failure_focus": header.get("primary_failure_focus"),
+        "nowplaying_classification": header.get("nowplaying_classification"),
     }
 
 
@@ -614,6 +710,14 @@ def observed_from_pipeline(pipeline: Dict[str, Any]) -> Dict[str, Any]:
         "total_5xx": website.get("total_5xx"),
         "source_map_404": website.get("source_map_404"),
         "source_map_status": website.get("source_map_status"),
+        "current_snapshot_id": website.get("snapshot_id"),
+        "recovery_evidence_window_status": website.get("recovery_evidence_window_status"),
+        "recovery_snapshot_id": website.get("recovery_snapshot_id"),
+        "autonomous_monitoring_decision": website.get("autonomous_monitoring_decision"),
+        "dominant_504_endpoint": website.get("dominant_504_endpoint"),
+        "dominant_504_share_percent": website.get("dominant_504_share_percent"),
+        "primary_failure_focus": website.get("primary_failure_focus"),
+        "nowplaying_classification": website.get("nowplaying_classification"),
     }
 
 
@@ -692,6 +796,7 @@ def evaluate(
     findings.extend(check_flag_invariant("breach", "breach", canonical, observed))
     findings.extend(check_flag_invariant("website_status", "website_status", canonical, observed))
     findings.extend(check_nowplaying_invariant(canonical, observed, master))
+    findings.extend(check_recovery_window_invariant(canonical, observed))
     findings.extend(check_sourcemap_invariant(canonical, observed))
     findings.extend(check_owner_priority_invariant(canonical, observed))
     findings.extend(check_overall_status_invariant(canonical, master))
@@ -978,7 +1083,7 @@ def _canonical_fixture(**overrides: Any) -> Dict[str, Any]:
         "http_503": 163,
         "http_522": 2,
         "http_526": 1,
-        "nowplaying_classification": "NOWPLAYING_ROUTE_MISMATCH",
+        "nowplaying_classification": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
         "nowplaying_automatic_repair_allowed": False,
         "wp_users_me_classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
         "autonomy_level": "LEVEL_2_MONITORING_ACTIVE",
@@ -1000,6 +1105,12 @@ def _canonical_fixture(**overrides: Any) -> Dict[str, Any]:
         "source_map_status": "OK",
         "rolling_window_status": "NEW_GROWTH_PRESENT",
         "website_correlation_status": "NORMAL",
+        "recovery_evidence_window_status": "EVIDENCE_WINDOW_ALIGNED",
+        "recovery_snapshot_id": "20260812-140000",
+        "autonomous_monitoring_decision": "OWNER_ACTION_REQUIRED",
+        "dominant_504_endpoint": "/api/nowplaying/electri-city-ai-electro-radio",
+        "dominant_504_share_percent": 46.67,
+        "primary_failure_focus": "AI_RADIO_NOWPLAYING_RECOVERY",
     }
     base.update(overrides)
     canonical = {
@@ -1038,6 +1149,14 @@ def _master_fixture(**header_overrides: Any) -> Dict[str, Any]:
         "nowplaying_504": 133,
         "source_map_404": 0,
         "source_map_status": "OK",
+        "current_snapshot_id": "20260812-140000",
+        "recovery_evidence_window_status": "EVIDENCE_WINDOW_ALIGNED",
+        "recovery_snapshot_id": "20260812-140000",
+        "autonomous_monitoring_decision": "OWNER_ACTION_REQUIRED",
+        "dominant_504_endpoint": "/api/nowplaying/electri-city-ai-electro-radio",
+        "dominant_504_share_percent": 46.67,
+        "primary_failure_focus": "AI_RADIO_NOWPLAYING_RECOVERY",
+        "nowplaying_classification": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
     }
     header.update(header_overrides)
     return {"overall_master_status": "WARNING", "canonical_header": header}
@@ -1055,7 +1174,19 @@ def _pipeline_fixture(**overrides: Any) -> Dict[str, Any]:
         "emergency_stop": False,
         "breach": False,
     }
-    website = {"overall_status": "WARNING", "total_5xx": 451, "nowplaying_504": 133}
+    website = {
+        "overall_status": "WARNING",
+        "total_5xx": 451,
+        "nowplaying_504": 133,
+        "snapshot_id": "20260812-140000",
+        "recovery_evidence_window_status": "EVIDENCE_WINDOW_ALIGNED",
+        "recovery_snapshot_id": "20260812-140000",
+        "autonomous_monitoring_decision": "OWNER_ACTION_REQUIRED",
+        "dominant_504_endpoint": "/api/nowplaying/electri-city-ai-electro-radio",
+        "dominant_504_share_percent": 46.67,
+        "primary_failure_focus": "AI_RADIO_NOWPLAYING_RECOVERY",
+        "nowplaying_classification": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
+    }
     runtime.update(overrides.pop("runtime", {}))
     website.update(overrides.pop("website", {}))
     return {
@@ -1076,6 +1207,13 @@ CLEAN_MASTER_MD = """# Sentinel Master Report
 | Canonical systemd Timer Active | `true` |
 | Canonical Emergency Stop | `false` |
 | Canonical NowPlaying 504 (24h) | `133` |
+| Canonical Recovery Evidence Window | `EVIDENCE_WINDOW_ALIGNED` |
+| Canonical Website Snapshot | `20260812-140000` |
+| Canonical Recovery Snapshot | `20260812-140000` |
+| Canonical Monitoring Decision | `OWNER_ACTION_REQUIRED` |
+| Canonical Primary Failure Focus | `AI_RADIO_NOWPLAYING_RECOVERY` |
+| Canonical Dominant 504 Endpoint | `/api/nowplaying/electri-city-ai-electro-radio` |
+| Canonical Dominant 504 Share Percent | `46.67` |
 | Canonical SourceMap Status | `OK` |
 | Legacy Autonomy Level (superseded) | `LEVEL_1_DRAFT_ONLY` |
 
@@ -1141,6 +1279,12 @@ def run_self_test() -> Dict[str, Any]:
     )
     checks["nowplaying_conflict_detected"] = violated(result, "nowplaying")
 
+    result = evaluate(
+        _canonical_fixture(), _master_fixture(recovery_snapshot_id="20260812-130000"),
+        CLEAN_MASTER_MD, _pipeline_fixture(), {}, "", "",
+    )
+    checks["mixed_recovery_window_detected"] = violated(result, "recovery_window")
+
     # SourceMap invariant: header WARNING from stale report vs current map_404=0.
     result = evaluate(
         _canonical_fixture(), _master_fixture(source_map_status="WARNING", source_map_404=70),
@@ -1186,6 +1330,13 @@ def run_self_test() -> Dict[str, Any]:
         "Runtime:\nLEVEL_1_DRAFT_ONLY\ntimer=not_installed\nNowPlaying 504: 0", "",
     )
     checks["daily_header_legacy_detected"] = violated(result, "daily_header")
+    result = evaluate(
+        _canonical_fixture(), _master_fixture(), CLEAN_MASTER_MD, _pipeline_fixture(), {},
+        "Recovery classification: NOWPLAYING_ROUTE_MISMATCH\n"
+        "Dominant 504 endpoint: /api/nowplaying/electri-city-ai-electro-radio (59.2% of current 504)",
+        "",
+    )
+    checks["stale_recovery_claims_detected"] = violated(result, "daily_header")
 
     # A labelled legacy region is documentation, not a current-truth claim.
     labelled_legacy_header = "\n".join([

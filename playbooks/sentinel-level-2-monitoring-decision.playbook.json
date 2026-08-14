@@ -1,0 +1,34 @@
+{
+  "allowed_operations": [
+    "refresh evidence",
+    "prioritize failures",
+    "select read-only diagnosis",
+    "NO_ACTION",
+    "MONITOR_CONTINUE",
+    "OWNER_ACTION_REQUIRED"
+  ],
+  "decisions": [
+    "NO_ACTION",
+    "MONITOR_CONTINUE",
+    "OWNER_ACTION_REQUIRED"
+  ],
+  "forbidden": [
+    "Cloudflare write",
+    "DNS change",
+    "TLS change",
+    "WAF change",
+    "WordPress write",
+    "database write",
+    "global nginx change",
+    "timeout change",
+    "credential search",
+    "unverified SSH",
+    "LOW_LIVE activation",
+    "MEDIUM execution",
+    "HIGH execution"
+  ],
+  "name": "sentinel-level-2-monitoring-decision",
+  "read_only": true,
+  "schema_version": "sentinel-monitoring-decision-engine-10.23",
+  "status": "PLAYBOOK_ACTIVE"
+}
