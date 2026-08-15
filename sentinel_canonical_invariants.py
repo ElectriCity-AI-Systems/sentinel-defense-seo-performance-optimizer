@@ -347,6 +347,126 @@ def check_nowplaying_invariant(
     return findings
 
 
+def check_promotion_blockers_invariant(
+    canonical: Dict[str, Any],
+    observed: Dict[str, Dict[str, Any]],
+    rendered_reports: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    block = canonical.get("promotion_blockers")
+    value = block.get("value") if isinstance(block, dict) else truth.UNKNOWN
+    expected = truth.normalize_promotion_blockers_value(value)
+    if expected != truth.UNKNOWN and not isinstance(expected, list):
+        findings.append(finding(
+            "promotion_blockers",
+            VIOLATION,
+            "Canonical promotion blockers are neither UNKNOWN nor a list.",
+            expected,
+            "UNKNOWN or list",
+            "canonical",
+        ))
+    for location, values in observed.items():
+        if "promotion_blockers" not in values:
+            continue
+        seen = truth.normalize_promotion_blockers_value(values.get("promotion_blockers"))
+        if seen != expected:
+            findings.append(finding(
+                "promotion_blockers",
+                VIOLATION,
+                f"{location} promotion blockers differ from canonical truth.",
+                seen,
+                expected,
+                location,
+            ))
+        else:
+            findings.append(finding(
+                "promotion_blockers",
+                OK,
+                f"{location} promotion blockers match canonical truth.",
+                seen,
+                expected,
+                location,
+            ))
+    split_unknown = "U, N, K, N, O, W, N"
+    for location, text in rendered_reports.items():
+        if split_unknown in text:
+            findings.append(finding(
+                "promotion_blockers",
+                VIOLATION,
+                f"{location} renders scalar UNKNOWN as characters.",
+                split_unknown,
+                truth.UNKNOWN,
+                location,
+            ))
+    return findings
+
+
+def check_wp_users_me_invariant(
+    canonical: Dict[str, Any],
+    observed: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    findings: List[Dict[str, Any]] = []
+    count = canonical_value(canonical, "wp_users_me_504")
+    classification_block = canonical.get("wp_users_me_classification")
+    classification = canonical_value(canonical, "wp_users_me_classification")
+    concrete = classification not in {
+        None,
+        truth.UNKNOWN,
+        truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+    }
+    if concrete and not (
+        isinstance(count, (int, float))
+        and not isinstance(count, bool)
+        and count > 0
+        and isinstance(classification_block, dict)
+        and classification_block.get("compatible_current_evidence") is True
+    ):
+        findings.append(finding(
+            "wp_users_me",
+            VIOLATION,
+            "Concrete users/me classification lacks compatible current 504 evidence.",
+            classification,
+            truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+            "canonical",
+        ))
+
+    expected_count = normalize(count)
+    expected_classification = normalize(classification)
+    for location, values in observed.items():
+        if "wp_users_me_504" in values:
+            seen_count = normalize(values.get("wp_users_me_504"))
+            if seen_count != expected_count:
+                findings.append(finding(
+                    "wp_users_me",
+                    VIOLATION,
+                    f"{location} users/me 504 count differs from canonical truth.",
+                    seen_count,
+                    expected_count,
+                    location,
+                ))
+        if "wp_users_me_classification" in values:
+            seen_classification = normalize(values.get("wp_users_me_classification"))
+            if seen_classification != expected_classification:
+                findings.append(finding(
+                    "wp_users_me",
+                    VIOLATION,
+                    f"{location} users/me classification differs from canonical truth.",
+                    seen_classification,
+                    expected_classification,
+                    location,
+                ))
+            else:
+                findings.append(finding(
+                    "wp_users_me",
+                    OK,
+                    f"{location} users/me classification matches canonical truth.",
+                    seen_classification,
+                    expected_classification,
+                    location,
+                ))
+    return findings
+
+
 def check_recovery_window_invariant(
     canonical: Dict[str, Any],
     observed: Dict[str, Dict[str, Any]],
@@ -675,6 +795,9 @@ def observed_from_master(master: Dict[str, Any]) -> Dict[str, Any]:
         "nowplaying_504": header.get("nowplaying_504"),
         "source_map_404": header.get("source_map_404"),
         "source_map_status": header.get("source_map_status"),
+        "promotion_blockers": header.get("promotion_blockers"),
+        "wp_users_me_504": header.get("wp_users_me_504"),
+        "wp_users_me_classification": header.get("wp_users_me_classification"),
         "website_status": header.get("website_status"),
         "total_5xx": header.get("total_5xx"),
         "current_snapshot_id": header.get("current_snapshot_id"),
@@ -710,6 +833,9 @@ def observed_from_pipeline(pipeline: Dict[str, Any]) -> Dict[str, Any]:
         "total_5xx": website.get("total_5xx"),
         "source_map_404": website.get("source_map_404"),
         "source_map_status": website.get("source_map_status"),
+        "promotion_blockers": runtime.get("promotion_blockers"),
+        "wp_users_me_504": website.get("wp_users_me_504"),
+        "wp_users_me_classification": website.get("wp_users_me_classification"),
         "current_snapshot_id": website.get("snapshot_id"),
         "recovery_evidence_window_status": website.get("recovery_evidence_window_status"),
         "recovery_snapshot_id": website.get("recovery_snapshot_id"),
@@ -796,6 +922,16 @@ def evaluate(
     findings.extend(check_flag_invariant("breach", "breach", canonical, observed))
     findings.extend(check_flag_invariant("website_status", "website_status", canonical, observed))
     findings.extend(check_nowplaying_invariant(canonical, observed, master))
+    findings.extend(check_promotion_blockers_invariant(
+        canonical,
+        observed,
+        {
+            "master": master_md,
+            "daily": daily_header,
+            "pipeline": pipeline_md,
+        },
+    ))
+    findings.extend(check_wp_users_me_invariant(canonical, observed))
     findings.extend(check_recovery_window_invariant(canonical, observed))
     findings.extend(check_sourcemap_invariant(canonical, observed))
     findings.extend(check_owner_priority_invariant(canonical, observed))
@@ -867,7 +1003,8 @@ def build_report() -> Dict[str, Any]:
         },
         "invariants": [
             "runtime", "emergency_stop", "timer", "low_live", "breach", "website_status",
-            "nowplaying", "sourcemap", "owner_priority", "overall_status",
+            "nowplaying", "promotion_blockers", "wp_users_me", "sourcemap",
+            "owner_priority", "overall_status",
             "executive_table", "daily_header",
         ],
         "observed": result["observed"],
@@ -896,7 +1033,15 @@ def build_daily_consistency(report: Dict[str, Any]) -> Dict[str, Any]:
         "total_5xx",
         "nowplaying_504",
         "low_live_enabled",
+        "promotion_blockers",
+        "wp_users_me_504",
+        "wp_users_me_classification",
     )
+    strict_fail_closed_fields = {
+        "promotion_blockers",
+        "wp_users_me_504",
+        "wp_users_me_classification",
+    }
     rows: List[Dict[str, Any]] = []
     for field in compared_fields:
         expected = normalize(canonical_value(canonical, field))
@@ -907,9 +1052,13 @@ def build_daily_consistency(report: Dict[str, Any]) -> Dict[str, Any]:
             "locations": {},
         }
         for location, values in observed.items():
+            if field not in values:
+                continue
             seen = normalize(values.get(field))
             row["locations"][location] = seen
-            if seen is not None and expected is not None and seen != expected:
+            if field in strict_fail_closed_fields and seen != expected:
+                row["identical"] = False
+            elif seen is not None and expected is not None and seen != expected:
                 row["identical"] = False
         rows.append(row)
     mismatched = [row["field"] for row in rows if not row["identical"]]
@@ -920,7 +1069,8 @@ def build_daily_consistency(report: Dict[str, Any]) -> Dict[str, Any]:
         "report_classification": REPORT_CLASSIFICATION,
         "rule": (
             "daily header runtime = master runtime = pipeline runtime; the same holds for timer, "
-            "emergency_stop, breach, owner_priority and website_status"
+            "emergency_stop, breach, owner_priority, website status, promotion blockers and "
+            "users/me evidence"
         ),
         "compared_locations": sorted(observed.keys()),
         "fields": rows,
@@ -1010,6 +1160,7 @@ def build_playbook() -> Dict[str, Any]:
         "identical_fields": [
             "autonomy_level", "runtime_stage", "timer_active", "emergency_stop", "breach",
             "owner_priority", "website_status", "total_5xx", "nowplaying_504", "low_live_enabled",
+            "promotion_blockers", "wp_users_me_504", "wp_users_me_classification",
         ],
         "illegal_combinations": [
             {"header_runtime": "LEVEL_1_DRAFT_ONLY", "pipeline_runtime": "LEVEL_2_MONITORING_ACTIVE"},
@@ -1085,7 +1236,6 @@ def _canonical_fixture(**overrides: Any) -> Dict[str, Any]:
         "http_526": 1,
         "nowplaying_classification": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
         "nowplaying_automatic_repair_allowed": False,
-        "wp_users_me_classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
         "autonomy_level": "LEVEL_2_MONITORING_ACTIVE",
         "runtime_stage": "LEVEL_2_MONITORING_ACTIVE",
         "monitoring_enabled": True,
@@ -1101,6 +1251,7 @@ def _canonical_fixture(**overrides: Any) -> Dict[str, Any]:
         "total_5xx": 451,
         "nowplaying_504": 133,
         "wp_users_me_504": 62,
+        "wp_users_me_classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
         "source_map_404": 0,
         "source_map_status": "OK",
         "rolling_window_status": "NEW_GROWTH_PRESENT",
@@ -1129,6 +1280,9 @@ def _canonical_fixture(**overrides: Any) -> Dict[str, Any]:
         str(base["owner_priority"]).upper().startswith("SEO")
         and base["website_status"] == "OK"
     )
+    canonical["wp_users_me_classification"]["compatible_current_evidence"] = True
+    canonical["wp_users_me_classification"]["current_504_count"] = base["wp_users_me_504"]
+    canonical["wp_users_me_classification"]["diagnostic_504_count"] = base["wp_users_me_504"]
     return {"status": "CANONICAL_TRUTH_OK", "generated_at_utc": "2026-08-12T14:00:00Z", "canonical": canonical}
 
 
@@ -1141,12 +1295,15 @@ def _master_fixture(**header_overrides: Any) -> Dict[str, Any]:
         "scheduler_status": "SCHEDULER_VERIFICATION_GREEN",
         "low_live_enabled": False,
         "production_apply_lock": True,
+        "promotion_blockers": ["cloudflare_write_canary"],
         "emergency_stop": False,
         "breach": False,
         "owner_priority": "WEBSITE_ORIGIN_STABILITY",
         "website_status": "WARNING",
         "total_5xx": 451,
         "nowplaying_504": 133,
+        "wp_users_me_504": 62,
+        "wp_users_me_classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
         "source_map_404": 0,
         "source_map_status": "OK",
         "current_snapshot_id": "20260812-140000",
@@ -1171,6 +1328,7 @@ def _pipeline_fixture(**overrides: Any) -> Dict[str, Any]:
         "scheduler_verification_status": "SCHEDULER_VERIFICATION_GREEN",
         "low_live_apply_enabled": False,
         "production_apply_lock": True,
+        "promotion_blockers": ["cloudflare_write_canary"],
         "emergency_stop": False,
         "breach": False,
     }
@@ -1178,6 +1336,8 @@ def _pipeline_fixture(**overrides: Any) -> Dict[str, Any]:
         "overall_status": "WARNING",
         "total_5xx": 451,
         "nowplaying_504": 133,
+        "wp_users_me_504": 62,
+        "wp_users_me_classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
         "snapshot_id": "20260812-140000",
         "recovery_evidence_window_status": "EVIDENCE_WINDOW_ALIGNED",
         "recovery_snapshot_id": "20260812-140000",
@@ -1278,6 +1438,65 @@ def run_self_test() -> Dict[str, Any]:
         _pipeline_fixture(), {}, "", "",
     )
     checks["nowplaying_conflict_detected"] = violated(result, "nowplaying")
+
+    # Promotion blockers must remain scalar UNKNOWN or a list, never characters.
+    result = evaluate(
+        _canonical_fixture(promotion_blockers=truth.UNKNOWN),
+        _master_fixture(promotion_blockers=truth.UNKNOWN),
+        CLEAN_MASTER_MD,
+        _pipeline_fixture(runtime={"promotion_blockers": truth.UNKNOWN}),
+        {},
+        "Promotion Blockers:\nU, N, K, N, O, W, N",
+        "",
+    )
+    checks["promotion_blocker_character_split_detected"] = violated(
+        result, "promotion_blockers"
+    )
+
+    # A concrete timeout paired with an unresolved current count is illegal.
+    result = evaluate(
+        _canonical_fixture(
+            wp_users_me_504=truth.UNKNOWN,
+            wp_users_me_classification="WP_USERS_ME_ORIGIN_TIMEOUT",
+        ),
+        _master_fixture(
+            wp_users_me_504=truth.UNKNOWN,
+            wp_users_me_classification="WP_USERS_ME_ORIGIN_TIMEOUT",
+        ),
+        CLEAN_MASTER_MD,
+        _pipeline_fixture(website={
+            "wp_users_me_504": truth.UNKNOWN,
+            "wp_users_me_classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
+        }),
+        {},
+        "",
+        "",
+    )
+    checks["wp_users_me_unknown_count_concrete_classification_detected"] = violated(
+        result, "wp_users_me"
+    )
+
+    fail_closed_wp = evaluate(
+        _canonical_fixture(
+            wp_users_me_504=truth.UNKNOWN,
+            wp_users_me_classification=truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+        ),
+        _master_fixture(
+            wp_users_me_504=truth.UNKNOWN,
+            wp_users_me_classification=truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+        ),
+        CLEAN_MASTER_MD,
+        _pipeline_fixture(website={
+            "wp_users_me_504": truth.UNKNOWN,
+            "wp_users_me_classification": truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+        }),
+        {},
+        "",
+        "",
+    )
+    checks["wp_users_me_fail_closed_state_passes"] = not violated(
+        fail_closed_wp, "wp_users_me"
+    )
 
     result = evaluate(
         _canonical_fixture(), _master_fixture(recovery_snapshot_id="20260812-130000"),

@@ -98,6 +98,7 @@ FRESHNESS_DEFINITIONS = {
 }
 
 UNKNOWN = "UNKNOWN"
+WP_USERS_ME_EVIDENCE_INSUFFICIENT = "WP_USERS_ME_EVIDENCE_INSUFFICIENT"
 
 # Source kinds decide how a timestamp is interpreted.
 KIND_RUNTIME_CYCLE = "RUNTIME_CYCLE"          # rewritten by the 2-minute guarded timer
@@ -964,6 +965,12 @@ DIAGNOSTIC_FIELDS: Dict[str, List[Candidate]] = {
     "wp_users_me_classification": [
         cand("origin_diagnostics", "wp_users_me_diagnostic.classification"),
     ],
+    "wp_users_me_diagnostic_504": [
+        cand(
+            "origin_diagnostics",
+            "wp_users_me_diagnostic.evidence.request_frequency.status_504_24h",
+        ),
+    ],
     "nowplaying_classification": [
         # Phase 10.22 evidence-guided recovery is the only current source. The
         # older route-mismatch report is retained as legacy but never selected.
@@ -1208,6 +1215,92 @@ def derived_provenance(
         "operational_effect": bool(resolved),
         "resolution": "RESOLVED" if resolved else "UNRESOLVED",
     }
+
+
+def normalize_promotion_blockers_value(value: Any) -> Any:
+    """Return UNKNOWN or a real list; never treat a scalar string as a sequence."""
+    if isinstance(value, str):
+        blocker = value.strip()
+        if not blocker or blocker.upper() == UNKNOWN:
+            return UNKNOWN
+        return [blocker]
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+        if isinstance(value, set):
+            items = sorted(items, key=str)
+        if any(not isinstance(item, str) or not item.strip() for item in items):
+            return UNKNOWN
+        return [item.strip() for item in items]
+    return UNKNOWN
+
+
+def promotion_blockers_provenance(fields: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    block = provenance(fields, "promotion_blockers")
+    normalized = normalize_promotion_blockers_value(block.get("value"))
+    if normalized == UNKNOWN:
+        return {
+            **block,
+            "value": UNKNOWN,
+            "operational_effect": False,
+            "resolution": "UNRESOLVED",
+            "normalization": "SCALAR_UNKNOWN_PRESERVED",
+        }
+    return {
+        **block,
+        "value": normalized,
+        "normalization": "BLOCKER_LIST_NORMALIZED",
+    }
+
+
+def format_promotion_blockers(value: Any) -> str:
+    normalized = normalize_promotion_blockers_value(value)
+    if normalized == UNKNOWN:
+        return UNKNOWN
+    return ", ".join(normalized) or "none"
+
+
+def derive_wp_users_me_classification(
+    fields: Dict[str, Dict[str, Any]],
+    generated_at: str,
+) -> Dict[str, Any]:
+    """Bind a concrete users/me diagnosis to the current compatible path count."""
+    classification = provenance(fields, "wp_users_me_classification")
+    current_count = value_of(fields, "wp_users_me_504")
+    diagnostic_count = value_of(fields, "wp_users_me_diagnostic_504")
+    current_count_resolved = (
+        isinstance(current_count, (int, float)) and not isinstance(current_count, bool)
+    )
+    diagnostic_count_resolved = (
+        isinstance(diagnostic_count, (int, float)) and not isinstance(diagnostic_count, bool)
+    )
+    compatible = bool(
+        current_count_resolved
+        and diagnostic_count_resolved
+        and current_count > 0
+        and float(current_count) == float(diagnostic_count)
+    )
+    metadata = {
+        "current_504_count": current_count if current_count_resolved else UNKNOWN,
+        "diagnostic_504_count": diagnostic_count if diagnostic_count_resolved else UNKNOWN,
+        "compatible_current_evidence": compatible,
+    }
+    value = classification.get("value")
+    if value == WP_USERS_ME_EVIDENCE_INSUFFICIENT:
+        return {**classification, **metadata}
+    if classification.get("resolution") == "RESOLVED" and compatible:
+        return {**classification, **metadata}
+
+    fail_closed = derived_provenance(
+        WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+        ["wp_users_me_504", "wp_users_me_diagnostic_504", "wp_users_me_classification"],
+        (
+            "A concrete users/me classification requires a resolved positive current 504 "
+            "count and a matching current diagnostic count. Missing or mismatched evidence "
+            "is classified as insufficient."
+        ),
+    )
+    fail_closed["generated_at"] = generated_at
+    return {**fail_closed, **metadata}
 
 
 # --------------------------------------------------------------------------- #
@@ -1616,7 +1709,7 @@ def assemble_canonical(
         "rollback_status": provenance(fields, "rollback_status"),
         "write_canary_status": provenance(fields, "write_canary_status"),
         "promotion_status": provenance(fields, "promotion_status"),
-        "promotion_blockers": provenance(fields, "promotion_blockers"),
+        "promotion_blockers": promotion_blockers_provenance(fields),
         "last_cycle_id": provenance(fields, "last_cycle_id"),
         "last_decision": provenance(fields, "last_decision"),
         "owner_priority": owner_priority,
@@ -1635,7 +1728,7 @@ def assemble_canonical(
         "top_failure_paths": provenance(fields, "top_failure_paths"),
         "origin_diagnostic_status": provenance(fields, "origin_diagnostic_status"),
         "origin_tls_status": provenance(fields, "origin_tls_status"),
-        "wp_users_me_classification": provenance(fields, "wp_users_me_classification"),
+        "wp_users_me_classification": derive_wp_users_me_classification(fields, generated_at),
         "nowplaying_classification": provenance(fields, "nowplaying_classification"),
         "nowplaying_automatic_repair_allowed": provenance(fields, "nowplaying_automatic_repair_allowed"),
         "nowplaying_repair_applied": provenance(fields, "nowplaying_repair_applied"),
@@ -1962,8 +2055,7 @@ def build_daily_summary_blocks(report: Dict[str, Any]) -> Dict[str, Any]:
         show(c("promotion_status")),
         "",
         "Promotion Blockers:",
-        ", ".join(str(item) for item in (c("promotion_blockers").get("value") or []))
-        or "none",
+        format_promotion_blockers(c("promotion_blockers").get("value")),
         "",
         "Last Cycle:",
         show(c("last_cycle_id")),
@@ -2497,6 +2589,35 @@ def validate_report(report: Dict[str, Any]) -> Dict[str, Any]:
         if block.get("freshness") not in FRESHNESS_VOCABULARY:
             findings.append(f"{name} has freshness outside the canonical vocabulary")
 
+    blockers = canonical.get("promotion_blockers", {})
+    blocker_value = blockers.get("value") if isinstance(blockers, dict) else None
+    if blocker_value != UNKNOWN and not (
+        isinstance(blocker_value, list)
+        and all(isinstance(item, str) and item for item in blocker_value)
+    ):
+        findings.append("promotion_blockers must be UNKNOWN or a list of blocker strings")
+
+    wp_count = canonical.get("wp_users_me_504", {})
+    wp_classification = canonical.get("wp_users_me_classification", {})
+    wp_classification_value = (
+        wp_classification.get("value") if isinstance(wp_classification, dict) else UNKNOWN
+    )
+    concrete_wp_classification = wp_classification_value not in {
+        UNKNOWN,
+        WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+    }
+    if concrete_wp_classification and not (
+        isinstance(wp_count, dict)
+        and wp_count.get("resolution") == "RESOLVED"
+        and isinstance(wp_count.get("value"), (int, float))
+        and not isinstance(wp_count.get("value"), bool)
+        and wp_count.get("value") > 0
+        and wp_classification.get("compatible_current_evidence") is True
+    ):
+        findings.append(
+            "concrete wp_users_me classification lacks compatible current 504 evidence"
+        )
+
     if report.get("status") == "CANONICAL_TRUTH_OK" and report.get("missing_fields"):
         findings.append("status is OK while required fields are missing")
     if report.get("status") == "CANONICAL_TRUTH_INCOMPLETE" and not report.get("missing_fields"):
@@ -2673,6 +2794,101 @@ def run_self_test() -> Dict[str, Any]:
         for entry in legacy["field_claims"]
     )
     checks["test_d_wp_users_me"] = value_of(fields, "wp_users_me_504") == 62
+
+    # Regression: a scalar UNKNOWN blocker is rendered as one scalar, never as
+    # the character sequence U, N, K, N, O, W, N. A real scalar blocker is
+    # normalized to a one-item list.
+    unresolved_blockers = promotion_blockers_provenance({})
+    scalar_blocker_fields = resolve_fields(_synthetic_sources(
+        runtime_promotion={
+            "generated_at": "2026-08-12T14:00:00Z",
+            "blockers": "cloudflare_write_canary",
+        },
+    ))
+    scalar_blockers = promotion_blockers_provenance(scalar_blocker_fields)
+    checks["test_d_blocker_unknown_not_character_iterable"] = (
+        unresolved_blockers["value"] == UNKNOWN
+        and format_promotion_blockers(unresolved_blockers["value"]) == UNKNOWN
+    )
+    checks["test_d_scalar_blocker_normalized_to_list"] = (
+        scalar_blockers["value"] == ["cloudflare_write_canary"]
+        and format_promotion_blockers(scalar_blockers["value"])
+        == "cloudflare_write_canary"
+    )
+
+    # Regression: a concrete users/me timeout requires a current path count
+    # matching the diagnostic count. Missing or mismatched counts fail closed.
+    compatible_wp_fields = resolve_fields(_synthetic_sources(
+        website=dict(website_payload),
+        origin_diagnostics={
+            "generated_at_utc": "2026-08-12T14:01:00Z",
+            "wp_users_me_diagnostic": {
+                "classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
+                "evidence": {
+                    "request_frequency": {"status_504_24h": 62},
+                },
+            },
+        },
+    ))
+    compatible_wp = derive_wp_users_me_classification(
+        compatible_wp_fields, "2026-08-12T14:02:00Z"
+    )
+    missing_wp_payload = {
+        **website_payload,
+        "origin_pressure_breakdown": {
+            **website_payload["origin_pressure_breakdown"],
+            "top_5xx_paths": [
+                {
+                    "path": NOWPLAYING_PATH,
+                    "count": 133,
+                    "statuses": [{"status": 504, "count": 133}],
+                },
+            ],
+        },
+    }
+    missing_wp_fields = resolve_fields(_synthetic_sources(
+        website=missing_wp_payload,
+        origin_diagnostics={
+            "generated_at_utc": "2026-08-12T14:01:00Z",
+            "wp_users_me_diagnostic": {
+                "classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
+                "evidence": {
+                    "request_frequency": {"status_504_24h": 62},
+                },
+            },
+        },
+    ))
+    missing_wp = derive_wp_users_me_classification(
+        missing_wp_fields, "2026-08-12T14:02:00Z"
+    )
+    mismatched_wp_fields = resolve_fields(_synthetic_sources(
+        website=dict(website_payload),
+        origin_diagnostics={
+            "generated_at_utc": "2026-08-12T14:01:00Z",
+            "wp_users_me_diagnostic": {
+                "classification": "WP_USERS_ME_ORIGIN_TIMEOUT",
+                "evidence": {
+                    "request_frequency": {"status_504_24h": 61},
+                },
+            },
+        },
+    ))
+    mismatched_wp = derive_wp_users_me_classification(
+        mismatched_wp_fields, "2026-08-12T14:02:00Z"
+    )
+    checks["test_d_wp_concrete_classification_requires_compatible_count"] = (
+        compatible_wp["value"] == "WP_USERS_ME_ORIGIN_TIMEOUT"
+        and compatible_wp["compatible_current_evidence"] is True
+    )
+    checks["test_d_wp_missing_count_fails_closed"] = (
+        value_of(missing_wp_fields, "wp_users_me_504") is None
+        and missing_wp["value"] == WP_USERS_ME_EVIDENCE_INSUFFICIENT
+        and missing_wp["compatible_current_evidence"] is False
+    )
+    checks["test_d_wp_mismatched_count_fails_closed"] = (
+        mismatched_wp["value"] == WP_USERS_ME_EVIDENCE_INSUFFICIENT
+        and mismatched_wp["compatible_current_evidence"] is False
+    )
 
     # Test D2 — Phase 10.22 recovery evidence supersedes the older route-mismatch
     # classification, and the live NowPlaying share is recalculated from the
@@ -2982,12 +3198,33 @@ def run_self_test() -> Dict[str, Any]:
         ),
     }
     blocks = build_daily_summary_blocks(sample_report)
+    unknown_blocker_canonical = dict(sample_canonical)
+    unknown_blocker_canonical["promotion_blockers"] = {
+        "value": UNKNOWN,
+        "source": None,
+        "source_class": None,
+        "generated_at": None,
+        "freshness": MISSING,
+        "operational_effect": False,
+        "resolution": "UNRESOLVED",
+    }
+    unknown_blocker_report = {
+        **sample_report,
+        "canonical": unknown_blocker_canonical,
+    }
+    unknown_blocker_blocks = build_daily_summary_blocks(unknown_blocker_report)
     checks["test_h_shared_blocks"] = (
         "LEVEL_2_MONITORING_ACTIVE" in blocks["header"]
         and "LEVEL_2_MONITORING_ACTIVE" in blocks["runtime_section"]
         and blocks["status_badge"] == "CRITICAL"
         and "LEVEL_1_DRAFT_ONLY" not in blocks["header"]
         and "not_installed" not in blocks["header"]
+    )
+    checks["test_h_unknown_blocker_rendered_atomically"] = (
+        unknown_blocker_blocks["runtime_section"][
+            unknown_blocker_blocks["runtime_section"].index("Promotion Blockers:") + 1
+        ] == UNKNOWN
+        and "U, N, K, N, O, W, N" not in unknown_blocker_blocks["runtime_section"]
     )
     imported = imported_module_roots()
     checks["no_process_execution_import"] = not (imported & PROCESS_MODULES)

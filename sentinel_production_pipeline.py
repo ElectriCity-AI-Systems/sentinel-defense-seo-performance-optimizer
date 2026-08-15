@@ -279,7 +279,7 @@ def collect_website_snapshot(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "http_526": value("http_526", 0),
         "nowplaying_504": nowplaying_504,
         "nowplaying_share_percent": round((nowplaying_504 / total_5xx) * 100, 2) if total_5xx else 0.0,
-        "wp_users_me_504": value("wp_users_me_504", 0),
+        "wp_users_me_504": value("wp_users_me_504", UNKNOWN),
         "wp_users_me_classification": value("wp_users_me_classification", UNKNOWN),
         "source_map_404": value("source_map_404"),
         "source_map_status": value("source_map_status", UNKNOWN),
@@ -328,6 +328,15 @@ def collect_origin_diagnostics(canonical: Dict[str, Any]) -> Dict[str, Any]:
     wp_users_me = data.get("wp_users_me_diagnostic") if isinstance(
         data.get("wp_users_me_diagnostic"), dict
     ) else {}
+    canonical_wp = canonical.get("wp_users_me_classification") if isinstance(
+        canonical.get("wp_users_me_classification"), dict
+    ) else {}
+    canonical_wp_classification = (
+        canonical_wp.get("value")
+        if canonical_wp.get("resolution") == "RESOLVED"
+        else UNKNOWN
+    )
+    raw_wp_classification = wp_users_me.get("classification")
     return {
         "status": "ORIGIN_DIAGNOSTICS_COLLECTED" if data else "ORIGIN_DIAGNOSTICS_MISSING",
         "report_status": block.get("value") if block.get("resolution") == "RESOLVED" else (
@@ -336,8 +345,15 @@ def collect_origin_diagnostics(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "freshness": block.get("freshness", MISSING),
         "generated_at_utc": data.get("generated_at_utc") if data else None,
         "tls_status": (data.get("origin_tls_diagnostic") or {}).get("status") if data else None,
-        "wp_users_me_classification": wp_users_me.get("classification"),
-        "wp_users_me_confidence": wp_users_me.get("confidence"),
+        "wp_users_me_classification": canonical_wp_classification,
+        "wp_users_me_confidence": (
+            wp_users_me.get("confidence")
+            if raw_wp_classification == canonical_wp_classification
+            else None
+        ),
+        "wp_users_me_compatible_current_evidence": canonical_wp.get(
+            "compatible_current_evidence", False
+        ),
         "wp_users_me_productive_rule_applied": wp_users_me.get("productive_rule_applied", False),
     }
 
@@ -449,7 +465,9 @@ def build_runtime_summary(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "rollback_status": value("rollback_status") or UNKNOWN,
         "write_canary_status": value("write_canary_status") or UNKNOWN,
         "promotion_status": value("promotion_status") or UNKNOWN,
-        "promotion_blockers": value("promotion_blockers") or [],
+        "promotion_blockers": canonical_truth.normalize_promotion_blockers_value(
+            value("promotion_blockers") if value("promotion_blockers") is not None else UNKNOWN
+        ),
         "last_cycle_id": value("last_cycle_id"),
         "last_decision": value("last_decision"),
         "breach": value("breach"),
@@ -859,6 +877,14 @@ def run_self_test() -> Dict[str, Any]:
         and empty_runtime["emergency_stop"] is None
         and empty_runtime["systemd_timer_active"] is None
     )
+    unknown_blocker_canonical = dict(fixture_canonical["canonical"])
+    unknown_blocker_canonical["promotion_blockers"] = {
+        "value": UNKNOWN,
+        "resolution": "UNRESOLVED",
+    }
+    checks["promotion_blocker_scalar_not_iterated"] = (
+        build_runtime_summary(unknown_blocker_canonical)["promotion_blockers"] == UNKNOWN
+    )
     priority = determine_owner_priority(fixture_canonical["canonical"])
     checks["owner_priority_from_canonical"] = priority["selected_priority"] == "WEBSITE_ORIGIN_STABILITY"
     checks["owner_priority_fail_closed"] = determine_owner_priority({})["selected_priority"] == (
@@ -867,6 +893,22 @@ def run_self_test() -> Dict[str, Any]:
     website = collect_website_snapshot(fixture_canonical["canonical"])
     checks["website_snapshot_canonical"] = (
         website["nowplaying_504"] == 133 and website["source_map_status"] == "OK"
+    )
+    unresolved_wp_canonical = dict(fixture_canonical["canonical"])
+    unresolved_wp_canonical["wp_users_me_504"] = {
+        "value": UNKNOWN,
+        "resolution": "UNRESOLVED",
+    }
+    unresolved_wp_canonical["wp_users_me_classification"] = {
+        "value": canonical_truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT,
+        "resolution": "RESOLVED",
+        "compatible_current_evidence": False,
+    }
+    unresolved_wp = collect_website_snapshot(unresolved_wp_canonical)
+    checks["wp_users_me_unknown_count_stays_fail_closed"] = (
+        unresolved_wp["wp_users_me_504"] == UNKNOWN
+        and unresolved_wp["wp_users_me_classification"]
+        == canonical_truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT
     )
 
     source_text = Path(__file__).read_text(encoding="utf-8")

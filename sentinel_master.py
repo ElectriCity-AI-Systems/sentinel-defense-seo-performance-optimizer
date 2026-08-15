@@ -3540,6 +3540,7 @@ CANONICAL_HEADER_FIELDS = (
     "rollback_status",
     "write_canary_status",
     "promotion_status",
+    "promotion_blockers",
     "owner_priority",
     "total_5xx",
     "http_504",
@@ -3589,7 +3590,15 @@ def build_canonical_header(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             header[f"{field}__source"] = block.get("source")
             header[f"{field}__freshness"] = block.get("freshness")
         else:
-            header[field] = None
+            header[field] = (
+                canonical_truth.UNKNOWN
+                if field in {
+                    "promotion_blockers",
+                    "wp_users_me_504",
+                    "wp_users_me_classification",
+                }
+                else None
+            )
             header[f"{field}__source"] = None
             header[f"{field}__freshness"] = canonical_truth.MISSING
     priority = canonical.get("owner_priority") if isinstance(canonical.get("owner_priority"), dict) else {}
@@ -3638,6 +3647,10 @@ def legacy_supersession_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
 def canonical_cell(header: Dict[str, Any], field: str) -> Any:
     """Value for an executive table cell; None renders as UNKNOWN, never as legacy."""
     value = header.get(field)
+    if field == "promotion_blockers":
+        return canonical_truth.format_promotion_blockers(
+            canonical_truth.UNKNOWN if value is None else value
+        )
     return canonical_truth.UNKNOWN if value is None else value
 
 
@@ -7929,6 +7942,7 @@ def render_canonical_runtime_section(
         "rollback_status",
         "write_canary_status",
         "promotion_status",
+        "promotion_blockers",
         "emergency_stop",
         "breach",
         "owner_priority",

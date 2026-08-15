@@ -28,7 +28,10 @@
     "website_status",
     "total_5xx",
     "nowplaying_504",
-    "low_live_enabled"
+    "low_live_enabled",
+    "promotion_blockers",
+    "wp_users_me_504",
+    "wp_users_me_classification"
   ],
   "illegal_combinations": [
     {
