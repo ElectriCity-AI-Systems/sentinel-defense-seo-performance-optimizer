@@ -264,8 +264,18 @@ def collect_website_snapshot(canonical: Dict[str, Any]) -> Dict[str, Any]:
             return default
         return block.get("value")
 
-    total_5xx = value("total_5xx", 0) or 0
-    nowplaying_504 = value("nowplaying_504", 0) or 0
+    total_5xx = value("total_5xx", UNKNOWN)
+    nowplaying_504 = value("nowplaying_504", UNKNOWN)
+    counts_resolved = all(
+        isinstance(item, (int, float)) and not isinstance(item, bool)
+        for item in (total_5xx, nowplaying_504)
+    )
+    if counts_resolved and total_5xx > 0:
+        nowplaying_share = round((nowplaying_504 / total_5xx) * 100, 2)
+    elif counts_resolved and total_5xx == 0 and nowplaying_504 == 0:
+        nowplaying_share = 0.0
+    else:
+        nowplaying_share = UNKNOWN
     return {
         "status": "WEBSITE_SNAPSHOT_COLLECTED",
         "overall_status": value("website_status", UNKNOWN),
@@ -278,7 +288,7 @@ def collect_website_snapshot(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "http_522": value("http_522", 0),
         "http_526": value("http_526", 0),
         "nowplaying_504": nowplaying_504,
-        "nowplaying_share_percent": round((nowplaying_504 / total_5xx) * 100, 2) if total_5xx else 0.0,
+        "nowplaying_share_percent": nowplaying_share,
         "wp_users_me_504": value("wp_users_me_504", UNKNOWN),
         "wp_users_me_classification": value("wp_users_me_classification", UNKNOWN),
         "source_map_404": value("source_map_404"),
@@ -909,6 +919,23 @@ def run_self_test() -> Dict[str, Any]:
         unresolved_wp["wp_users_me_504"] == UNKNOWN
         and unresolved_wp["wp_users_me_classification"]
         == canonical_truth.WP_USERS_ME_EVIDENCE_INSUFFICIENT
+    )
+    unresolved_nowplaying_canonical = dict(fixture_canonical["canonical"])
+    unresolved_nowplaying_canonical["nowplaying_504"] = {
+        "value": UNKNOWN,
+        "resolution": "UNRESOLVED",
+    }
+    unresolved_nowplaying_canonical["nowplaying_classification"] = {
+        "value": canonical_truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+        "resolution": "RESOLVED",
+        "compatible_current_evidence": False,
+    }
+    unresolved_nowplaying = collect_website_snapshot(unresolved_nowplaying_canonical)
+    checks["nowplaying_unknown_count_stays_fail_closed"] = (
+        unresolved_nowplaying["nowplaying_504"] == UNKNOWN
+        and unresolved_nowplaying["nowplaying_share_percent"] == UNKNOWN
+        and unresolved_nowplaying["nowplaying_classification"]
+        == canonical_truth.NOWPLAYING_EVIDENCE_INSUFFICIENT
     )
 
     source_text = Path(__file__).read_text(encoding="utf-8")

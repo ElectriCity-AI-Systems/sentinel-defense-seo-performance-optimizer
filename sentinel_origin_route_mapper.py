@@ -859,11 +859,15 @@ def build_endpoint_matrix(
         origin_probe = probes.get(f"ORIGIN:{key}", {})
 
         status_counts = error_row.get("status_counts", {})
-        current_504 = int(status_counts.get("504", 0))
-        current_503 = int(status_counts.get("503", 0))
-        current_5xx = int(error_row.get("total_5xx", 0))
+        current_504 = int(status_counts["504"]) if "504" in status_counts else None
+        current_503 = int(status_counts["503"]) if "503" in status_counts else None
+        current_5xx = int(error_row["total_5xx"]) if "total_5xx" in error_row else None
         requests_24h = int(traffic_row.get("requests_24h", 0))
-        failure_ratio = round(current_5xx / requests_24h * 100, 2) if requests_24h else None
+        failure_ratio = (
+            round(current_5xx / requests_24h * 100, 2)
+            if isinstance(current_5xx, int) and requests_24h
+            else None
+        )
 
         origin_reachable = origin_verdict(origin_probe) == "ORIGIN_OK" if origin_probe else None
         causality_status, causality_reason = endpoint_causality(
@@ -876,6 +880,11 @@ def build_endpoint_matrix(
             "hostname": host,
             "current_5xx": current_5xx,
             "current_504": current_504,
+            "current_504_evidence": (
+                "CURRENT_ENDPOINT_STATUS_OBSERVED"
+                if current_504 is not None
+                else EVIDENCE_INSUFFICIENT
+            ),
             "current_503": current_503,
             "requests_24h": requests_24h or None,
             "failure_ratio_percent": failure_ratio,
@@ -939,7 +948,7 @@ def application_hint(origin_probe: Dict[str, Any]) -> Optional[str]:
 
 
 def endpoint_causality(
-    current_504: int,
+    current_504: Optional[int],
     requests_24h: int,
     origin_probe: Dict[str, Any],
     edge_probe: Dict[str, Any],
@@ -948,6 +957,8 @@ def endpoint_causality(
     """Evidence level for the failing layer, never a guess."""
     if not ownership_row:
         return EVIDENCE_INSUFFICIENT, "ORIGIN_EVIDENCE_INSUFFICIENT"
+    if current_504 is None:
+        return EVIDENCE_INSUFFICIENT, "CURRENT_ENDPOINT_504_EVIDENCE_MISSING"
     if current_504 == 0:
         return EVIDENCE_PROVEN, "NO_CURRENT_504"
     if not origin_probe:
@@ -1121,13 +1132,20 @@ def classify_nowplaying(
     microcache_state: Dict[str, Any],
 ) -> Tuple[str, str, str]:
     """Classification from observed evidence only; the class never authorises a repair."""
-    current_504 = int(row.get("current_504") or 0)
     if not row or row.get("origin_evidence_level") != EVIDENCE_PROVEN:
         return (
             "NOWPLAYING_EVIDENCE_INSUFFICIENT",
             EVIDENCE_INSUFFICIENT,
             "No authoritative origin record for the NowPlaying hostname.",
         )
+    current_504_value = row.get("current_504")
+    if not isinstance(current_504_value, (int, float)) or isinstance(current_504_value, bool):
+        return (
+            "NOWPLAYING_EVIDENCE_INSUFFICIENT",
+            EVIDENCE_INSUFFICIENT,
+            "Current endpoint-specific 504 evidence is missing or unresolved.",
+        )
+    current_504 = int(current_504_value)
     if current_504 == 0:
         return (
             "NOWPLAYING_HEALTHY",
@@ -1560,6 +1578,26 @@ def run_self_test() -> Dict[str, Any]:
     )
     checks["reproduced_timeout_is_proven"] = (
         timeout_class == "NOWPLAYING_ORIGIN_CONNECTION_TIMEOUT" and timeout_evidence == EVIDENCE_PROVEN
+    )
+    missing_class, missing_evidence, _ = classify_nowplaying(
+        {"origin_evidence_level": EVIDENCE_PROVEN, "current_504": None},
+        {"status_code": 200, "latency_ms": 8.0, "headers": {}},
+        {"status_code": 200},
+        {"present_at_actual_origin": True},
+    )
+    explicit_zero_class, explicit_zero_evidence, _ = classify_nowplaying(
+        {"origin_evidence_level": EVIDENCE_PROVEN, "current_504": 0},
+        {"status_code": 200, "latency_ms": 8.0, "headers": {}},
+        {"status_code": 200},
+        {"present_at_actual_origin": True},
+    )
+    checks["missing_current_504_fails_closed"] = (
+        missing_class == "NOWPLAYING_EVIDENCE_INSUFFICIENT"
+        and missing_evidence == EVIDENCE_INSUFFICIENT
+    )
+    checks["explicit_current_zero_can_be_healthy"] = (
+        explicit_zero_class == "NOWPLAYING_HEALTHY"
+        and explicit_zero_evidence == EVIDENCE_PROVEN
     )
     checks["classes_declared"] = chain_class in NOWPLAYING_CLASSES and timeout_class in NOWPLAYING_CLASSES
     checks["edge_challenge_not_health"] = (

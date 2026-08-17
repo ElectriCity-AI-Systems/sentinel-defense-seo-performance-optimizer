@@ -295,8 +295,16 @@ def read_snapshot(directory: Path) -> Dict[str, Any]:
             result["totals"][status_code] += count
         entry = result["endpoints"].setdefault(
             endpoint_key(host, path),
-            {"hostname": host, "path": path, "total_5xx": 0, "status_counts": {}, "requests_24h": 0},
+            {
+                "hostname": host,
+                "path": path,
+                "total_5xx": 0,
+                "status_counts": {},
+                "requests_24h": 0,
+                "error_evidence_present": False,
+            },
         )
+        entry["error_evidence_present"] = True
         entry["total_5xx"] += count
         entry["status_counts"][status_code] = entry["status_counts"].get(status_code, 0) + count
 
@@ -309,7 +317,14 @@ def read_snapshot(directory: Path) -> Dict[str, Any]:
                 continue
             entry = result["endpoints"].setdefault(
                 endpoint_key(host, path),
-                {"hostname": host, "path": path, "total_5xx": 0, "status_counts": {}, "requests_24h": 0},
+                {
+                    "hostname": host,
+                    "path": path,
+                    "total_5xx": 0,
+                    "status_counts": {},
+                    "requests_24h": 0,
+                    "error_evidence_present": False,
+                },
             )
             entry["requests_24h"] += int(row.get("count", 0) or 0)
             entry.setdefault("all_status_counts", {})
@@ -330,13 +345,20 @@ def load_series(depth: int = SERIES_DEPTH) -> List[Dict[str, Any]]:
 # Rate engine — rolling counter versus current error production
 # --------------------------------------------------------------------------- #
 
-def endpoint_count(snapshot: Dict[str, Any], key: str, status: Optional[str] = None) -> int:
+def endpoint_count(
+    snapshot: Dict[str, Any], key: str, status: Optional[str] = None
+) -> Optional[int]:
     entry = snapshot.get("endpoints", {}).get(key)
     if not entry:
-        return 0
+        return None
     if status is None:
+        if not entry.get("error_evidence_present") and not entry.get("status_counts"):
+            return None
         return int(entry.get("total_5xx", 0))
-    return int(entry.get("status_counts", {}).get(status, 0))
+    status_counts = entry.get("status_counts", {})
+    if status not in status_counts:
+        return None
+    return int(status_counts[status])
 
 
 def endpoint_requests(snapshot: Dict[str, Any], key: str) -> int:
@@ -368,6 +390,17 @@ def window_rate(
     minutes = round((current_at - previous_at).total_seconds() / 60.0, 2)
     current_count = endpoint_count(current, key, status)
     previous_count = endpoint_count(previous, key, status)
+    if current_count is None or previous_count is None:
+        return {
+            "window_steps": steps,
+            "window_minutes": minutes,
+            "from_snapshot": previous.get("snapshot_id"),
+            "to_snapshot": current.get("snapshot_id"),
+            "rolling_count_before": previous_count,
+            "rolling_count_now": current_count,
+            "evidence": EVIDENCE_NOT_COLLECTED,
+            "reason": "Endpoint-specific status evidence is missing in one or both snapshots.",
+        }
     delta = current_count - previous_count
     request_delta = endpoint_requests(current, key) - endpoint_requests(previous, key)
     return {
@@ -425,23 +458,35 @@ def build_baseline() -> Dict[str, Any]:
     for item in TRACKED_ENDPOINTS:
         key = endpoint_key(item["host"], item["path"])
         entry = current["endpoints"].get(key, {})
+        total_5xx = endpoint_count(current, key)
+        count_504 = endpoint_count(current, key, "504")
+        count_503 = endpoint_count(current, key, "503")
+        requests_24h = int(entry.get("requests_24h", 0))
         endpoints[item["path"]] = {
             "hostname": item["host"],
             "path": item["path"],
-            "total_5xx": int(entry.get("total_5xx", 0)),
-            "count_504": int(entry.get("status_counts", {}).get("504", 0)),
-            "count_503": int(entry.get("status_counts", {}).get("503", 0)),
-            "requests_24h": int(entry.get("requests_24h", 0)),
+            "total_5xx": total_5xx,
+            "count_504": count_504,
+            "count_504_evidence": (
+                "CURRENT_ENDPOINT_STATUS_OBSERVED"
+                if count_504 is not None
+                else EVIDENCE_NOT_COLLECTED
+            ),
+            "count_503": count_503,
+            "requests_24h": requests_24h,
             "status_mix": entry.get("all_status_counts", {}),
             "failure_ratio_percent": (
-                round(int(entry.get("total_5xx", 0)) / int(entry.get("requests_24h", 0)) * 100, 2)
-                if entry.get("requests_24h") else None
+                round(total_5xx / requests_24h * 100, 2)
+                if isinstance(total_5xx, int) and requests_24h else None
             ),
             "rates": endpoint_rates(series, key),
         }
     zone_key_totals = {
         "504": sum(
-            endpoint_count(current, key, "504") for key in current["endpoints"]
+            count
+            for key in current["endpoints"]
+            for count in [endpoint_count(current, key, "504")]
+            if count is not None
         ),
     }
     return {
@@ -460,8 +505,8 @@ def build_baseline() -> Dict[str, Any]:
         "total_522": totals["522"],
         "total_526": totals["526"],
         "first_party_504_total": zone_key_totals["504"],
-        "nowplaying_504": endpoints.get(NOWPLAYING_PATH, {}).get("count_504", 0),
-        "users_me_504": endpoints.get(WP_USERS_ME_PATH, {}).get("count_504", 0),
+        "nowplaying_504": endpoints.get(NOWPLAYING_PATH, {}).get("count_504"),
+        "users_me_504": endpoints.get(WP_USERS_ME_PATH, {}).get("count_504"),
         "new_504_last_5m": EVIDENCE_NOT_COLLECTED,
         "new_504_last_15m": endpoints.get(NOWPLAYING_PATH, {}).get("rates", {}).get("15m", {}).get("new_errors_lower_bound"),
         "new_504_last_60m": endpoints.get(NOWPLAYING_PATH, {}).get("rates", {}).get("60m", {}).get("new_errors_lower_bound"),
@@ -514,7 +559,12 @@ def analyze_users_me(baseline: Dict[str, Any], matrix: Dict[str, Any]) -> Dict[s
         (row for row in matrix.get("endpoints", []) if row.get("endpoint") == WP_USERS_ME_PATH), {}
     )
     status_mix = endpoint.get("status_mix", {}) or {}
-    count_504 = int(endpoint.get("count_504", 0))
+    count_504_value = endpoint.get("count_504")
+    count_504 = (
+        int(count_504_value)
+        if isinstance(count_504_value, (int, float)) and not isinstance(count_504_value, bool)
+        else None
+    )
     count_401 = int(status_mix.get("401", 0))
     count_200 = int(status_mix.get("200", 0))
     requests = int(endpoint.get("requests_24h", 0))
@@ -543,7 +593,7 @@ def analyze_users_me(baseline: Dict[str, Any], matrix: Dict[str, Any]) -> Dict[s
             "evidence_level": level if matched else EVIDENCE_INSUFFICIENT,
         })
 
-    origin_timeout = count_504 > 0 and matrix_row.get("origin_evidence_level") in {
+    origin_timeout = count_504 is not None and count_504 > 0 and matrix_row.get("origin_evidence_level") in {
         EVIDENCE_PROVEN, EVIDENCE_STRONG
     }
     add(
@@ -553,7 +603,7 @@ def analyze_users_me(baseline: Dict[str, Any], matrix: Dict[str, Any]) -> Dict[s
         f"the authoritative origin {matrix_row.get('origin')}.",
         EVIDENCE_STRONG,
     )
-    anonymous_timeout = count_504 > 0 and count_401 > 0 and count_200 == 0
+    anonymous_timeout = count_504 is not None and count_504 > 0 and count_401 > 0 and count_200 == 0
     add(
         "WP_USERS_ME_ANONYMOUS_TIMEOUT",
         anonymous_timeout,
@@ -563,7 +613,7 @@ def analyze_users_me(baseline: Dict[str, Any], matrix: Dict[str, Any]) -> Dict[s
     )
     add(
         "WP_USERS_ME_AUTHENTICATED_TIMEOUT",
-        count_200 > 0 and count_504 > 0,
+        count_200 > 0 and count_504 is not None and count_504 > 0,
         "Authenticated responses would be required to attribute timeouts to logged-in sessions."
         if count_200 == 0 else "Successful authenticated responses are present alongside timeouts.",
         EVIDENCE_SUGGESTIVE,
@@ -697,7 +747,7 @@ def build_failure_graph(route_map: Dict[str, Any], baseline: Dict[str, Any]) -> 
     for route in route_map.get("routes", []):
         path = route.get("endpoint")
         endpoint_baseline = baseline.get("endpoints", {}).get(path, {})
-        if not int(endpoint_baseline.get("total_5xx", 0)):
+        if not int(endpoint_baseline.get("total_5xx") or 0):
             continue
         chain = []
         for step in route.get("chain", []):
@@ -751,7 +801,7 @@ def build_repairability(
     for row in matrix.get("endpoints", []):
         path = row["endpoint"]
         endpoint_baseline = baseline.get("endpoints", {}).get(path, {})
-        failure_count = int(endpoint_baseline.get("total_5xx", 0))
+        failure_count = int(endpoint_baseline.get("total_5xx") or 0)
         graph_row = graph_by_endpoint.get(path, {})
         target = repair_target_for(path)
         cause_known = row.get("evidence_level") == EVIDENCE_PROVEN and bool(graph_row.get("first_failing_layer"))
@@ -788,7 +838,7 @@ def build_repairability(
             "endpoint": path,
             "hostname": row.get("hostname"),
             "failure_count": failure_count,
-            "current_504": int(endpoint_baseline.get("count_504", 0)),
+            "current_504": endpoint_baseline.get("count_504"),
             "primary_failure_mode": row.get("causality_status"),
             "origin": row.get("origin"),
             "origin_known": origin_known,
@@ -866,7 +916,12 @@ def primary_failure_focus(baseline: Dict[str, Any], repairability: Dict[str, Any
         candidates.append({
             "endpoint": path,
             "new_errors_lower_bound_15m": new_lower_bound if isinstance(new_lower_bound, int) else 0,
-            "current_504": int(endpoint.get("count_504", 0)),
+            "current_504": (
+                int(endpoint["count_504"])
+                if isinstance(endpoint.get("count_504"), (int, float))
+                and not isinstance(endpoint.get("count_504"), bool)
+                else None
+            ),
             "failure_ratio_percent": endpoint.get("failure_ratio_percent") or 0.0,
             "requests_24h": requests,
             "safely_repairable": bool(repair_row.get("automatic_repair_allowed")),
@@ -875,7 +930,7 @@ def primary_failure_focus(baseline: Dict[str, Any], repairability: Dict[str, Any
         candidates,
         key=lambda row: (
             -row["new_errors_lower_bound_15m"],
-            -row["current_504"],
+            -(row["current_504"] or 0),
             -row["failure_ratio_percent"],
             -row["requests_24h"],
             not row["safely_repairable"],
@@ -1126,7 +1181,9 @@ def evaluate_effect(
         "triggered_guards": [row["guard"] for row in triggered],
         "error_migration": migration,
         "rolling_window_decay": (
-            "PENDING" if current.get("count_504", 0) > 0 else "CONFIRMED"
+            "EVIDENCE_INSUFFICIENT"
+            if current.get("count_504") is None
+            else "PENDING" if current.get("count_504") > 0 else "CONFIRMED"
         ),
     }
 
@@ -1181,6 +1238,55 @@ def counterfactual(dominant: Dict[str, Any], gate: Dict[str, Any]) -> Dict[str, 
 # Assembly
 # --------------------------------------------------------------------------- #
 
+def normalize_nowplaying_chain(
+    chain: Dict[str, Any], baseline: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Reject a concrete or healthy chain class without matching current evidence."""
+    current_count = baseline.get("endpoints", {}).get(NOWPLAYING_PATH, {}).get("count_504")
+    chain_count = chain.get("current_504")
+    current_resolved = (
+        isinstance(current_count, (int, float)) and not isinstance(current_count, bool)
+    )
+    chain_resolved = isinstance(chain_count, (int, float)) and not isinstance(chain_count, bool)
+    counts_compatible = bool(
+        current_resolved
+        and chain_resolved
+        and float(current_count) == float(chain_count)
+    )
+    failure_class = chain.get("failure_class")
+    class_compatible = bool(
+        counts_compatible
+        and (
+            (failure_class == "NOWPLAYING_HEALTHY" and float(current_count) == 0)
+            or (
+                failure_class
+                not in {None, "NOWPLAYING_HEALTHY", "NOWPLAYING_EVIDENCE_INSUFFICIENT"}
+                and float(current_count) > 0
+            )
+        )
+    )
+    metadata = {
+        "current_504": current_count if current_resolved else None,
+        "route_map_504": chain_count if chain_resolved else None,
+        "compatible_current_evidence": class_compatible,
+    }
+    if failure_class == "NOWPLAYING_EVIDENCE_INSUFFICIENT":
+        return {**chain, **metadata}
+    if class_compatible:
+        return {**chain, **metadata}
+    return {
+        **chain,
+        **metadata,
+        "status": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
+        "failure_class": "NOWPLAYING_EVIDENCE_INSUFFICIENT",
+        "failure_evidence_level": EVIDENCE_INSUFFICIENT,
+        "failure_reason": (
+            "A healthy or concrete NowPlaying classification requires matching current "
+            "endpoint-specific 504 evidence. Missing or mismatched evidence fails closed."
+        ),
+        "automatic_repair_allowed": False,
+    }
+
 def build_recovery(
     persist_outputs: bool = True,
     write_playbooks: bool = True,
@@ -1189,7 +1295,9 @@ def build_recovery(
     baseline = build_baseline()
     route_map = load_dict(route_mapper.ROUTE_MAP_JSON)
     matrix = load_dict(route_mapper.ENDPOINT_MATRIX_JSON)
-    chain = load_dict(route_mapper.NOWPLAYING_CHAIN_JSON)
+    chain = normalize_nowplaying_chain(
+        load_dict(route_mapper.NOWPLAYING_CHAIN_JSON), baseline
+    )
     users_me = analyze_users_me(baseline, matrix)
     graph = build_failure_graph(route_map, baseline)
     repairability = build_repairability(matrix, graph, baseline, users_me)
@@ -1212,9 +1320,15 @@ def build_recovery(
             ),
         }
 
+    comparable_endpoints = [
+        item
+        for item in baseline.get("endpoints", {}).items()
+        if isinstance(item[1].get("count_504"), (int, float))
+        and not isinstance(item[1].get("count_504"), bool)
+    ]
     dominant = max(
-        baseline.get("endpoints", {}).items(),
-        key=lambda item: int(item[1].get("count_504", 0)),
+        comparable_endpoints,
+        key=lambda item: int(item[1]["count_504"]),
         default=(None, {}),
     )
     dominant_path, dominant_row = dominant
@@ -1223,7 +1337,8 @@ def build_recovery(
     )
     total_504 = int(baseline.get("total_504", 0))
     dominant_share = (
-        round(int(dominant_row.get("count_504", 0)) / total_504 * 100, 2) if total_504 else None
+        round(int(dominant_row["count_504"]) / total_504 * 100, 2)
+        if dominant_row and total_504 else None
     )
 
     recovery = {
@@ -1238,7 +1353,7 @@ def build_recovery(
         "route_map_status": route_map.get("status", "NOT_RUN"),
         "baseline": baseline,
         "dominant_504_endpoint": dominant_path,
-        "dominant_504_count": int(dominant_row.get("count_504", 0)) if dominant_row else 0,
+        "dominant_504_count": int(dominant_row["count_504"]) if dominant_row else None,
         "dominant_504_share_percent": dominant_share,
         "dominant_504_origin": dominant_matrix.get("origin"),
         "dominant_origin_evidence": dominant_matrix.get("origin_evidence_level"),
@@ -1248,6 +1363,9 @@ def build_recovery(
             "failure_class": chain.get("failure_class"),
             "failure_evidence_level": chain.get("failure_evidence_level"),
             "failure_reason": chain.get("failure_reason"),
+            "current_504": chain.get("current_504"),
+            "route_map_504": chain.get("route_map_504"),
+            "compatible_current_evidence": chain.get("compatible_current_evidence", False),
             "origin_target": chain.get("origin_target"),
             "origin_local_to_sentinel_host": chain.get("origin_local_to_sentinel_host"),
             "cache_layer_verdict": chain.get("cache_layer", {}).get("verdict"),
@@ -1823,6 +1941,46 @@ def run_self_test() -> Dict[str, Any]:
     )
     checks["short_series_not_invented"] = (
         window_rate(_fixture_series([100]), key, 1)["evidence"] == EVIDENCE_NOT_COLLECTED
+    )
+
+    # Regression: traffic-only rows do not prove an endpoint-specific zero.
+    traffic_only = {
+        "snapshot_id": "20260812-000000",
+        "snapshot_at": "2026-08-12T00:00:00Z",
+        "endpoints": {
+            key: {
+                "hostname": NOWPLAYING_HOST,
+                "path": NOWPLAYING_PATH,
+                "total_5xx": 0,
+                "status_counts": {},
+                "requests_24h": 95,
+                "error_evidence_present": False,
+            }
+        },
+    }
+    checks["missing_endpoint_504_is_unknown"] = endpoint_count(
+        traffic_only, key, "504"
+    ) is None
+    checks["missing_endpoint_504_rate_not_invented"] = (
+        window_rate([traffic_only, {**traffic_only, "snapshot_id": "20260812-001500",
+                     "snapshot_at": "2026-08-12T00:15:00Z"}], key, 1)["evidence"]
+        == EVIDENCE_NOT_COLLECTED
+    )
+    failed_closed_chain = normalize_nowplaying_chain(
+        {"failure_class": "NOWPLAYING_HEALTHY", "current_504": None},
+        {"endpoints": {NOWPLAYING_PATH: {"count_504": None}}},
+    )
+    explicit_zero_chain = normalize_nowplaying_chain(
+        {"failure_class": "NOWPLAYING_HEALTHY", "current_504": 0},
+        {"endpoints": {NOWPLAYING_PATH: {"count_504": 0}}},
+    )
+    checks["healthy_without_current_evidence_fails_closed"] = (
+        failed_closed_chain["failure_class"] == "NOWPLAYING_EVIDENCE_INSUFFICIENT"
+        and failed_closed_chain["compatible_current_evidence"] is False
+    )
+    checks["healthy_with_explicit_zero_is_compatible"] = (
+        explicit_zero_chain["failure_class"] == "NOWPLAYING_HEALTHY"
+        and explicit_zero_chain["compatible_current_evidence"] is True
     )
 
     # Test I — traffic disappears, so a zero error count proves nothing.

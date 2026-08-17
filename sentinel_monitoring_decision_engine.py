@@ -398,13 +398,23 @@ def origin_access_status(ownership: Dict[str, Any], origin: Any) -> Dict[str, An
 
 
 def classify_failure_boundary(row: Dict[str, Any], chain: Dict[str, Any]) -> Dict[str, Any]:
-    count_504 = int(row.get("current_504") or 0)
+    count_value = row.get("current_504")
+    count_504 = (
+        int(count_value)
+        if isinstance(count_value, (int, float)) and not isinstance(count_value, bool)
+        else None
+    )
     probe = chain.get("origin_probe") if isinstance(chain.get("origin_probe"), dict) else {}
     status_code = probe.get("status_code")
     timed_out = probe.get("timed_out") is True
     error = probe.get("error")
 
-    if count_504 == 0:
+    if count_504 is None:
+        layer = "NOWPLAYING_EVIDENCE_INSUFFICIENT"
+        evidence = "INSUFFICIENT"
+        exact = False
+        reason = "Current endpoint-specific NowPlaying 504 evidence is missing or unresolved."
+    elif count_504 == 0:
         layer = "NO_CURRENT_NOWPLAYING_504"
         evidence = "PROVEN"
         exact = True
@@ -479,8 +489,8 @@ def build_correlation() -> Dict[str, Any]:
         "hostname": NOWPLAYING_HOST,
         "authoritative_origin": row.get("origin"),
         "origin_authority_evidence": row.get("origin_evidence_level"),
-        "cloudflare_504": int(row.get("current_504") or 0),
-        "cloudflare_5xx": int(row.get("current_5xx") or 0),
+        "cloudflare_504": row.get("current_504"),
+        "cloudflare_5xx": row.get("current_5xx"),
         "requests_24h": row.get("requests_24h"),
         "failure_ratio_percent": row.get("failure_ratio_percent"),
         "dominant_cache_status": row.get("cache_class"),
@@ -522,7 +532,12 @@ def safety_state() -> Dict[str, Any]:
 def select_monitoring_decision(
     window: Dict[str, Any], correlation: Dict[str, Any], safety: Dict[str, Any]
 ) -> Dict[str, Any]:
-    count_504 = int(correlation.get("cloudflare_504") or 0)
+    count_value = correlation.get("cloudflare_504")
+    count_504 = (
+        int(count_value)
+        if isinstance(count_value, (int, float)) and not isinstance(count_value, bool)
+        else None
+    )
     access = correlation.get("origin_access", {}).get("status")
     boundary = correlation.get("failure_boundary", {})
     rate_15m = correlation.get("new_504_lower_bound_15m")
@@ -549,6 +564,13 @@ def select_monitoring_decision(
         decision = "OWNER_ACTION_REQUIRED"
         next_diagnostic = "REVIEW_RUNTIME_SAFETY_INVARIANT"
         reason = "A runtime safety invariant is not in the required fail-closed state."
+    elif count_504 is None:
+        decision = "MONITOR_CONTINUE"
+        next_diagnostic = "REFRESH_ENDPOINT_SPECIFIC_NOWPLAYING_EVIDENCE"
+        reason = (
+            "Current endpoint-specific NowPlaying 504 evidence is unresolved; monitoring "
+            "continues without inferring a healthy state or making a productive change."
+        )
     elif count_504 == 0:
         decision = "NO_ACTION"
         next_diagnostic = "CONTINUE_SCHEDULED_MONITORING"
@@ -888,6 +910,16 @@ def self_test() -> Dict[str, Any]:
         },
         safe,
     )
+    unresolved_boundary = classify_failure_boundary({"current_504": None}, {})
+    unresolved = select_monitoring_decision(
+        aligned,
+        {
+            "cloudflare_504": None,
+            "origin_access": {"status": "REMOTE_OWNER_ACTION_REQUIRED"},
+            "failure_boundary": unresolved_boundary,
+        },
+        safe,
+    )
     mismatch = select_monitoring_decision(
         {"status": EVIDENCE_WINDOW_MISMATCH},
         {"cloudflare_504": 0, "origin_access": {}, "failure_boundary": {}},
@@ -911,8 +943,13 @@ def self_test() -> Dict[str, Any]:
         ),
         "remote_origin_owner_gated": owner["decision"] == "OWNER_ACTION_REQUIRED",
         "zero_current_504_no_action": no_action["decision"] == "NO_ACTION",
+        "unknown_current_504_not_healthy": (
+            unresolved_boundary["failure_layer"] == "NOWPLAYING_EVIDENCE_INSUFFICIENT"
+            and unresolved_boundary["confidence"] == "INSUFFICIENT"
+            and unresolved["decision"] == "MONITOR_CONTINUE"
+        ),
         "all_decisions_non_productive": all(
-            row["execution"] == "NO_ACTION" for row in (owner, no_action, mismatch)
+            row["execution"] == "NO_ACTION" for row in (owner, no_action, unresolved, mismatch)
         ),
         "no_new_waf_rule": owner["new_waf_rule_recommended"] is False,
         "low_live_unchanged": EXECUTION_BOUNDARIES["low_live_activation"] is False,

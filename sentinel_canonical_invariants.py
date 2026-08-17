@@ -312,32 +312,72 @@ def check_nowplaying_invariant(
 ) -> List[Dict[str, Any]]:
     findings: List[Dict[str, Any]] = []
     current = canonical_value(canonical, "nowplaying_504")
-    if current is None:
-        return [finding("nowplaying", NOT_EVALUATED, "Canonical NowPlaying 504 count is unresolved.")]
+    classification_block = canonical.get("nowplaying_classification")
+    classification = canonical_value(canonical, "nowplaying_classification")
+    count_resolved = (
+        isinstance(current, (int, float)) and not isinstance(current, bool)
+    )
+    compatible = (
+        isinstance(classification_block, dict)
+        and classification_block.get("compatible_current_evidence") is True
+    )
+    if classification == "NOWPLAYING_HEALTHY" and not (
+        count_resolved and float(current) == 0 and compatible
+    ):
+        findings.append(finding(
+            "nowplaying",
+            VIOLATION,
+            "NOWPLAYING_HEALTHY lacks compatible explicit current zero evidence.",
+            classification,
+            truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+            "canonical",
+        ))
+    elif classification not in {
+        None,
+        truth.UNKNOWN,
+        "NOWPLAYING_HEALTHY",
+        truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+    } and not (count_resolved and current > 0 and compatible):
+        findings.append(finding(
+            "nowplaying",
+            VIOLATION,
+            "Concrete NowPlaying classification lacks compatible current 504 evidence.",
+            classification,
+            truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+            "canonical",
+        ))
+    if not count_resolved and classification != truth.NOWPLAYING_EVIDENCE_INSUFFICIENT:
+        findings.append(finding(
+            "nowplaying",
+            VIOLATION,
+            "Unresolved NowPlaying count must use the fail-closed classification.",
+            classification,
+            truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+            "canonical",
+        ))
+
+    expected = normalize(current)
     for location, values in observed.items():
         seen = values.get("nowplaying_504")
         if seen is None:
             continue
-        try:
-            seen_int = int(seen)
-        except (TypeError, ValueError):
-            continue
-        if seen_int != int(current):
+        normalized_seen = normalize(seen)
+        if normalized_seen != expected:
             findings.append(finding(
                 "nowplaying", VIOLATION,
-                f"{location} reports NowPlaying 504={seen_int} while current website evidence "
-                f"reports {int(current)}.",
-                seen_int, int(current), location,
+                f"{location} reports NowPlaying 504={normalized_seen} while current website "
+                f"evidence reports {expected}.",
+                normalized_seen, expected, location,
             ))
         else:
             findings.append(finding(
                 "nowplaying", OK, f"{location} NowPlaying 504 matches current evidence.",
-                seen_int, int(current), location,
+                normalized_seen, expected, location,
             ))
     legacy = master.get("ai_radio_timeout_diagnosis")
     if isinstance(legacy, dict) and legacy.get("nowplaying_504") is not None:
         legacy_value = legacy.get("nowplaying_504")
-        if int(current) > 0 and int(legacy_value or 0) != int(current):
+        if count_resolved and current > 0 and int(legacy_value or 0) != int(current):
             findings.append(finding(
                 "nowplaying", OK,
                 "Legacy AI-Radio NowPlaying count differs from current evidence and must stay "
@@ -1438,6 +1478,50 @@ def run_self_test() -> Dict[str, Any]:
         _pipeline_fixture(), {}, "", "",
     )
     checks["nowplaying_conflict_detected"] = violated(result, "nowplaying")
+
+    # Missing current endpoint evidence must never coexist with a healthy class.
+    result = evaluate(
+        _canonical_fixture(
+            nowplaying_504=truth.UNKNOWN,
+            nowplaying_classification="NOWPLAYING_HEALTHY",
+        ),
+        _master_fixture(
+            nowplaying_504=truth.UNKNOWN,
+            nowplaying_classification="NOWPLAYING_HEALTHY",
+        ),
+        CLEAN_MASTER_MD,
+        _pipeline_fixture(website={
+            "nowplaying_504": truth.UNKNOWN,
+            "nowplaying_classification": "NOWPLAYING_HEALTHY",
+        }),
+        {},
+        "",
+        "",
+    )
+    checks["nowplaying_unknown_count_healthy_detected"] = violated(
+        result, "nowplaying"
+    )
+    fail_closed_nowplaying = evaluate(
+        _canonical_fixture(
+            nowplaying_504=truth.UNKNOWN,
+            nowplaying_classification=truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+        ),
+        _master_fixture(
+            nowplaying_504=truth.UNKNOWN,
+            nowplaying_classification=truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+        ),
+        CLEAN_MASTER_MD,
+        _pipeline_fixture(website={
+            "nowplaying_504": truth.UNKNOWN,
+            "nowplaying_classification": truth.NOWPLAYING_EVIDENCE_INSUFFICIENT,
+        }),
+        {},
+        "",
+        "",
+    )
+    checks["nowplaying_unknown_count_fail_closed_passes"] = not violated(
+        fail_closed_nowplaying, "nowplaying"
+    )
 
     # Promotion blockers must remain scalar UNKNOWN or a list, never characters.
     result = evaluate(

@@ -99,6 +99,7 @@ FRESHNESS_DEFINITIONS = {
 
 UNKNOWN = "UNKNOWN"
 WP_USERS_ME_EVIDENCE_INSUFFICIENT = "WP_USERS_ME_EVIDENCE_INSUFFICIENT"
+NOWPLAYING_EVIDENCE_INSUFFICIENT = "NOWPLAYING_EVIDENCE_INSUFFICIENT"
 
 # Source kinds decide how a timestamp is interpreted.
 KIND_RUNTIME_CYCLE = "RUNTIME_CYCLE"          # rewritten by the 2-minute guarded timer
@@ -976,6 +977,9 @@ DIAGNOSTIC_FIELDS: Dict[str, List[Candidate]] = {
         # older route-mismatch report is retained as legacy but never selected.
         cand("origin_504_recovery", "nowplaying_chain.failure_class"),
     ],
+    "nowplaying_recovery_504": [
+        cand("origin_504_recovery", "baseline.nowplaying_504"),
+    ],
     "nowplaying_automatic_repair_allowed": [
         cand("origin_504_recovery", "nowplaying_chain.automatic_repair_allowed"),
     ],
@@ -1297,6 +1301,58 @@ def derive_wp_users_me_classification(
             "A concrete users/me classification requires a resolved positive current 504 "
             "count and a matching current diagnostic count. Missing or mismatched evidence "
             "is classified as insufficient."
+        ),
+    )
+    fail_closed["generated_at"] = generated_at
+    return {**fail_closed, **metadata}
+
+
+def derive_nowplaying_classification(
+    fields: Dict[str, Dict[str, Any]],
+    generated_at: str,
+) -> Dict[str, Any]:
+    """Allow NOWPLAYING_HEALTHY only with matching explicit current zero evidence."""
+    classification = provenance(fields, "nowplaying_classification")
+    current_count = value_of(fields, "nowplaying_504")
+    recovery_count = value_of(fields, "nowplaying_recovery_504")
+    current_resolved = (
+        isinstance(current_count, (int, float)) and not isinstance(current_count, bool)
+    )
+    recovery_resolved = (
+        isinstance(recovery_count, (int, float)) and not isinstance(recovery_count, bool)
+    )
+    counts_match = bool(
+        current_resolved
+        and recovery_resolved
+        and float(current_count) == float(recovery_count)
+    )
+    value = classification.get("value")
+    compatible = bool(
+        counts_match
+        and (
+            (value == "NOWPLAYING_HEALTHY" and float(current_count) == 0)
+            or (
+                value not in {None, UNKNOWN, "NOWPLAYING_HEALTHY", NOWPLAYING_EVIDENCE_INSUFFICIENT}
+                and float(current_count) > 0
+            )
+        )
+    )
+    metadata = {
+        "current_504_count": current_count if current_resolved else UNKNOWN,
+        "recovery_504_count": recovery_count if recovery_resolved else UNKNOWN,
+        "compatible_current_evidence": compatible,
+    }
+    if value == NOWPLAYING_EVIDENCE_INSUFFICIENT:
+        return {**classification, **metadata}
+    if classification.get("resolution") == "RESOLVED" and compatible:
+        return {**classification, **metadata}
+
+    fail_closed = derived_provenance(
+        NOWPLAYING_EVIDENCE_INSUFFICIENT,
+        ["nowplaying_504", "nowplaying_recovery_504", "nowplaying_classification"],
+        (
+            "NOWPLAYING_HEALTHY requires matching explicit current and recovery 504 counts "
+            "equal to zero. Other concrete classifications require matching positive counts."
         ),
     )
     fail_closed["generated_at"] = generated_at
@@ -1729,7 +1785,7 @@ def assemble_canonical(
         "origin_diagnostic_status": provenance(fields, "origin_diagnostic_status"),
         "origin_tls_status": provenance(fields, "origin_tls_status"),
         "wp_users_me_classification": derive_wp_users_me_classification(fields, generated_at),
-        "nowplaying_classification": provenance(fields, "nowplaying_classification"),
+        "nowplaying_classification": derive_nowplaying_classification(fields, generated_at),
         "nowplaying_automatic_repair_allowed": provenance(fields, "nowplaying_automatic_repair_allowed"),
         "nowplaying_repair_applied": provenance(fields, "nowplaying_repair_applied"),
         "consistency_status": provenance(fields, "consistency_status"),
@@ -2618,6 +2674,45 @@ def validate_report(report: Dict[str, Any]) -> Dict[str, Any]:
             "concrete wp_users_me classification lacks compatible current 504 evidence"
         )
 
+    nowplaying_count = canonical.get("nowplaying_504", {})
+    nowplaying_classification = canonical.get("nowplaying_classification", {})
+    nowplaying_value = (
+        nowplaying_classification.get("value")
+        if isinstance(nowplaying_classification, dict)
+        else UNKNOWN
+    )
+    nowplaying_count_resolved = bool(
+        isinstance(nowplaying_count, dict)
+        and nowplaying_count.get("resolution") == "RESOLVED"
+        and isinstance(nowplaying_count.get("value"), (int, float))
+        and not isinstance(nowplaying_count.get("value"), bool)
+    )
+    if not nowplaying_count_resolved and nowplaying_value != NOWPLAYING_EVIDENCE_INSUFFICIENT:
+        findings.append(
+            "unresolved NowPlaying 504 count must use NOWPLAYING_EVIDENCE_INSUFFICIENT"
+        )
+    if nowplaying_value == "NOWPLAYING_HEALTHY" and not (
+        nowplaying_count_resolved
+        and float(nowplaying_count.get("value")) == 0
+        and nowplaying_classification.get("compatible_current_evidence") is True
+    ):
+        findings.append(
+            "NOWPLAYING_HEALTHY lacks compatible explicit current zero evidence"
+        )
+    concrete_nowplaying = nowplaying_value not in {
+        UNKNOWN,
+        "NOWPLAYING_HEALTHY",
+        NOWPLAYING_EVIDENCE_INSUFFICIENT,
+    }
+    if concrete_nowplaying and not (
+        nowplaying_count_resolved
+        and nowplaying_count.get("value") > 0
+        and nowplaying_classification.get("compatible_current_evidence") is True
+    ):
+        findings.append(
+            "concrete NowPlaying classification lacks compatible current 504 evidence"
+        )
+
     if report.get("status") == "CANONICAL_TRUTH_OK" and report.get("missing_fields"):
         findings.append("status is OK while required fields are missing")
     if report.get("status") == "CANONICAL_TRUTH_INCOMPLETE" and not report.get("missing_fields"):
@@ -2888,6 +2983,68 @@ def run_self_test() -> Dict[str, Any]:
     checks["test_d_wp_mismatched_count_fails_closed"] = (
         mismatched_wp["value"] == WP_USERS_ME_EVIDENCE_INSUFFICIENT
         and mismatched_wp["compatible_current_evidence"] is False
+    )
+
+    # Regression: absence from endpoint-specific 5xx evidence is UNKNOWN, not
+    # an implicit zero. Healthy is valid only when both current and recovery
+    # evidence explicitly carry the same zero count.
+    missing_nowplaying_payload = {
+        **website_payload,
+        "origin_pressure_breakdown": {
+            **website_payload["origin_pressure_breakdown"],
+            "top_5xx_paths": [
+                {
+                    "path": WP_USERS_ME_PATH,
+                    "count": 62,
+                    "statuses": [{"status": 504, "count": 62}],
+                },
+            ],
+        },
+    }
+    missing_nowplaying_fields = resolve_fields(_synthetic_sources(
+        website=missing_nowplaying_payload,
+        origin_504_recovery={
+            "generated_at_utc": "2026-08-12T14:01:00Z",
+            "nowplaying_chain": {"failure_class": "NOWPLAYING_HEALTHY"},
+            "baseline": {"nowplaying_504": None},
+        },
+    ))
+    missing_nowplaying = derive_nowplaying_classification(
+        missing_nowplaying_fields, "2026-08-12T14:02:00Z"
+    )
+    explicit_zero_payload = {
+        **website_payload,
+        "origin_pressure_breakdown": {
+            **website_payload["origin_pressure_breakdown"],
+            "top_5xx_paths": [
+                {
+                    "path": NOWPLAYING_PATH,
+                    "count": 0,
+                    "statuses": [{"status": 504, "count": 0}],
+                },
+            ],
+        },
+    }
+    explicit_zero_fields = resolve_fields(_synthetic_sources(
+        website=explicit_zero_payload,
+        origin_504_recovery={
+            "generated_at_utc": "2026-08-12T14:01:00Z",
+            "nowplaying_chain": {"failure_class": "NOWPLAYING_HEALTHY"},
+            "baseline": {"nowplaying_504": 0},
+        },
+    ))
+    explicit_zero_nowplaying = derive_nowplaying_classification(
+        explicit_zero_fields, "2026-08-12T14:02:00Z"
+    )
+    checks["test_d_nowplaying_missing_count_fails_closed"] = (
+        value_of(missing_nowplaying_fields, "nowplaying_504") is None
+        and missing_nowplaying["value"] == NOWPLAYING_EVIDENCE_INSUFFICIENT
+        and missing_nowplaying["compatible_current_evidence"] is False
+    )
+    checks["test_d_nowplaying_explicit_zero_can_be_healthy"] = (
+        value_of(explicit_zero_fields, "nowplaying_504") == 0
+        and explicit_zero_nowplaying["value"] == "NOWPLAYING_HEALTHY"
+        and explicit_zero_nowplaying["compatible_current_evidence"] is True
     )
 
     # Test D2 — Phase 10.22 recovery evidence supersedes the older route-mismatch
