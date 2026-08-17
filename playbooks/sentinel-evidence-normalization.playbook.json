@@ -1,0 +1,26 @@
+{
+  "schema_version": "sentinel-evidence-normalization-playbook-1",
+  "name": "sentinel-evidence-normalization",
+  "risk_class": "READ_ONLY",
+  "opentelemetry_aligned_fields": [
+    "event_name",
+    "timestamp",
+    "observed_timestamp",
+    "severity_text",
+    "severity_number",
+    "body",
+    "resource",
+    "attributes"
+  ],
+  "ocsf_alignment": {
+    "mapping": "vendor_neutral_conceptual_http_activity",
+    "normative_event_claim": false
+  },
+  "provenance_required": true,
+  "source_timestamp_may_be_unknown": true,
+  "response_body_storage": false,
+  "credential_storage": false,
+  "full_user_agent_storage": false,
+  "verified_user_impact_default": "unknown",
+  "causality_proven_default": false
+}

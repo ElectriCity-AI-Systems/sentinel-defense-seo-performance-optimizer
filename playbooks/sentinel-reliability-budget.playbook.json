@@ -1,0 +1,22 @@
+{
+  "schema_version": "sentinel-reliability-budget-playbook-1",
+  "name": "sentinel-reliability-budget",
+  "risk_class": "READ_ONLY_DECISION_SUPPORT",
+  "reference": "PROVISIONAL_TECHNICAL_EDGE_SLI_NOT_USER_SLO",
+  "owner_approved": false,
+  "default_target": 0.99,
+  "error_definition": "aggregated_5xx_responses",
+  "human_user_slo_available": false,
+  "multiwindow_burn_rate_requires_non_overlapping_denominators": true,
+  "automatic_policy_effect": false,
+  "decision_policy": {
+    "budget_exhausted": "PRIORITIZE_RELIABILITY_OVER_OPTIMIZATION",
+    "budget_at_risk": "LIMIT_CHANGE_AND_REVIEW_RELIABILITY",
+    "budget_available": "CONTINUE_EVIDENCE_GATED_OPERATIONS"
+  },
+  "prohibited_claims": [
+    "verified_human_impact_from_edge_aggregate",
+    "owner_approved_slo_without_owner_decision",
+    "multiwindow_burn_rate_from_overlapping_rolling_totals"
+  ]
+}

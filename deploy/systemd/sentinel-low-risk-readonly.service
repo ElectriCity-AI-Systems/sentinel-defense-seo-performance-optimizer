@@ -1,0 +1,13 @@
+# REVIEW DRAFT ONLY - DO NOT INSTALL WITHOUT SEPARATE OWNER APPROVAL
+# LOW-RISK read-only monitoring only. Global Emergency Stop remains active for write/apply paths.
+[Unit]
+Description=Sentinel LOW-RISK read-only SEO/Performance monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/sentinel-defense
+ExecStart=/usr/bin/env python3 sentinel_low_risk_autonomy.py --run-once
+Nice=10
+IOSchedulingClass=best-effort

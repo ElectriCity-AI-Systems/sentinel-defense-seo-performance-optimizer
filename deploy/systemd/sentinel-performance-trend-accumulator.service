@@ -1,0 +1,9 @@
+[Unit]
+Description=Sentinel Performance Trend Accumulator (read-only review draft)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/sentinel-defense
+ExecStart=/usr/bin/python3 /srv/sentinel-defense/sentinel_performance_trend_accumulator.py --collect-now
+ExecStart=/usr/bin/python3 /srv/sentinel-defense/sentinel_performance_trend_accumulator.py --analyze-trends

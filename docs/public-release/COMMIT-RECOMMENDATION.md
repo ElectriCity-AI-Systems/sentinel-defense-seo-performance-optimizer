@@ -1,0 +1,25 @@
+# Commit Recommendation
+
+Recommended public checkpoint files:
+
+- `sentinel_public_release_pack.py`
+- `sentinel_autonomy.py`
+- `docs/public-release/README-public.md`
+- `docs/public-release/SAFETY-BOUNDARIES.md`
+- `docs/public-release/OWNER-COMMANDS.md`
+- `docs/public-release/OWNER-RUNBOOK-public.md`
+- `docs/public-release/PRODUCT-SUMMARY.md`
+- `docs/public-release/DEMO-SAFE-WALKTHROUGH.md`
+- `docs/public-release/GITHUB-RELEASE-NOTES.md`
+- `docs/public-release/PAYHIP-LISTING.md`
+- `docs/public-release/GUMROAD-LISTING.md`
+- `docs/public-release/FAQ.md`
+- `docs/public-release/NOT-AUTOPILOT-DISCLAIMER.md`
+- `docs/public-release/COMMIT-RECOMMENDATION.md`
+- `docs/public-release/public-release-manifest.json`
+- `playbooks/sentinel-public-release-pack.playbook.json`
+- `playbooks/sentinel-public-release-safety-docs.playbook.json`
+- `playbooks/sentinel-public-release-sales-copy.playbook.json`
+- `playbooks/sentinel-public-release-validation.playbook.json`
+
+Keep runtime reports, adaptive state ledgers, audit logs, generated exports, backups and credential files local.

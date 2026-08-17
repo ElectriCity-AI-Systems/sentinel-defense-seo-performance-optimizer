@@ -1,0 +1,11 @@
+[Unit]
+Description=Sentinel SourceMap Prevention Simulation
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/sentinel-defense
+EnvironmentFile=-/etc/sentinel-defense.env
+ExecStart=/usr/bin/python3 /srv/sentinel-defense/sentinel_sourcemap_prevention.py --mode sourcemap-simulate
+User=deploy
+Group=deploy

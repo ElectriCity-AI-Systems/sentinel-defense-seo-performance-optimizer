@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Sentinel SourceMap Prevention Simulation
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=60min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

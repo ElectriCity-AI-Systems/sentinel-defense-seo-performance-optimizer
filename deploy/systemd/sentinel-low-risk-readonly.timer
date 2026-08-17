@@ -1,0 +1,12 @@
+# REVIEW DRAFT ONLY - DO NOT INSTALL WITHOUT SEPARATE OWNER APPROVAL
+[Unit]
+Description=Run Sentinel LOW-RISK read-only monitor every 6 hours
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+Unit=sentinel-low-risk-readonly.service
+
+[Install]
+WantedBy=timers.target

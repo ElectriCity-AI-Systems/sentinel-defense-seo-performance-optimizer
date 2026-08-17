@@ -1,0 +1,23 @@
+{
+  "schema_version": "sentinel-counterfactual-replay-playbook-1",
+  "name": "sentinel-counterfactual-replay",
+  "risk_class": "SHADOW_ONLY",
+  "purpose": "Replay evidence gates against historical observations without applying a treatment.",
+  "allowed_results": [
+    "SHADOW_RECOMMENDED",
+    "SHADOW_REVIEW_WITH_EVIDENCE_GAP",
+    "SHADOW_SATISFIED_BY_EXISTING_EVIDENCE",
+    "SHADOW_BLOCKED",
+    "SHADOW_NOT_RECOMMENDED"
+  ],
+  "productive_actions_executed": 0,
+  "causal_effect_estimation": "NOT_AVAILABLE_FROM_OBSERVATIONAL_AGGREGATES",
+  "required_guards": [
+    "every_action_auto_execute_false",
+    "no_policy_scope_expansion",
+    "no_inferred_user_impact",
+    "no_live_adapter_call",
+    "no_remote_target"
+  ],
+  "breach": false
+}

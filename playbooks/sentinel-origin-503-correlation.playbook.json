@@ -1,9 +1,39 @@
 {
   "causality_policy": "correlation_is_not_causality",
   "evidence_levels": ["A_DIRECT", "B_STRONG_CORRELATION", "C_WEAK_CORRELATION"],
-  "inputs": ["local_status_aggregates", "local_path_aggregates", "local_actor_aggregates", "local_origin_evidence"],
+  "inputs": [
+    "local_status_aggregates",
+    "local_path_aggregates",
+    "local_actor_aggregates",
+    "local_origin_evidence",
+    "private_ionos_webspace_evidence"
+  ],
   "name": "sentinel-origin-503-correlation",
-  "prohibited_conclusions": ["php_worker_exhaustion_without_logs", "plugin_failure_without_logs", "hosting_limit_without_logs"],
+  "prohibited_conclusions": [
+    "php_worker_exhaustion_without_logs",
+    "plugin_failure_without_logs",
+    "hosting_limit_without_logs",
+    "scanner_actor_is_cause_without_timestamp_evidence",
+    "scanner_correlated_503_is_harmless",
+    "actor_wide_block_from_path_aggregate"
+  ],
+  "response_semantics": {
+    "expected_candidates": [
+      "unauthenticated_rest_401",
+      "method_restricted_comments_405",
+      "intentional_default_content_410",
+      "scanner_probe_404"
+    ],
+    "origin_signals": ["scanner_correlated_503", "public_path_503", "static_asset_503"],
+    "context_required": ["admin_ajax_403", "root_404", "root_429"]
+  },
+  "sequence_policy": {
+    "minimum_equal_count_paths": 3,
+    "preserve_raw_request_counts": true,
+    "group_duplicate_operational_recommendations": true,
+    "request_duplication_must_not_be_assumed": true,
+    "causality_must_not_be_inferred": true
+  },
   "risk_class": "READ_ONLY",
-  "schema_version": "10.17"
+  "schema_version": "10.17.1"
 }

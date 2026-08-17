@@ -1,0 +1,28 @@
+{
+  "allowed_modes": [],
+  "apply_status": "not_applied",
+  "autonomy_enabled": false,
+  "blocked_modes": [
+    "live_apply",
+    "wordpress_write",
+    "cloudflare_change",
+    "nginx_change",
+    "htaccess_change",
+    "dns_change",
+    "external_network_call",
+    "browser_automation",
+    "cms_login"
+  ],
+  "draft_only_enabled": false,
+  "emergency_stop": true,
+  "last_owner_lock_action": {
+    "command": "emergency-stop",
+    "note": "return to safe stop after draft-only autonomy test",
+    "timestamp_utc": "2026-06-11T04:26:24Z"
+  },
+  "live_apply_enabled": false,
+  "max_autonomy_level": "LEVEL_1_DRAFT_ONLY",
+  "owner_disable_switch": true,
+  "schema_version": "autonomy-runtime-lock-3.5",
+  "validation_only_enabled": false
+}

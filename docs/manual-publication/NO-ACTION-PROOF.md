@@ -1,0 +1,21 @@
+# No-Action Proof
+
+- no README overwrite
+- no LICENSE overwrite
+- no Git tag
+- no GitHub API
+- no Payhip API
+- no Gumroad API
+- no network publication
+- no email
+- no WordPress apply
+- no Cloudflare apply
+- no database apply
+- no SFTP/FTP apply
+- no Nginx apply
+- no `.htaccess` apply
+- no timer, cron or systemd installation
+- no LOW_LIVE, MEDIUM or HIGH execution
+- breach: `false`
+- live_apply: `false`
+- emergency_stop: `true`

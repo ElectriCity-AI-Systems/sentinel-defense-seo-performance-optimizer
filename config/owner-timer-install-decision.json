@@ -1,0 +1,23 @@
+{
+  "apply_status": "not_applied",
+  "can_execute_live": false,
+  "can_install_timer_now": false,
+  "crontab_file_written": false,
+  "decision_breach": false,
+  "decision_status": "reviewed_ready_for_manual_install",
+  "install_allowed_now": false,
+  "last_owner_decision_action": {
+    "command": "mark-review-ready",
+    "note": "owner reviewed packet; manual install may be considered later",
+    "timestamp_utc": "2026-06-11T06:00:05Z"
+  },
+  "live_apply": false,
+  "manual_install_allowed": true,
+  "owner_acknowledged_emergency_stop": true,
+  "owner_acknowledged_manual_only": true,
+  "owner_acknowledged_no_live_apply": true,
+  "owner_acknowledged_rollback": true,
+  "schema_version": "owner-timer-install-decision-gate-4.2",
+  "systemd_file_written": false,
+  "updated_at_utc": "2026-06-11T06:00:05Z"
+}
