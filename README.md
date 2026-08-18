@@ -4,6 +4,15 @@
 
 Sentinel Defense ist eine defensive, report-getriebene Schutzkette fuer Website, Hetzner-Server und private lokale Ubuntu-Maschine.
 
+Die Website ist dauerhaft durch Cloudflare-Regeln und Sentinel-Monitoring geschuetzt.
+Der Hetzner-Server wird dauerhaft durch den Hetzner Local Defense Agent ueberwacht.
+Die private lokale Maschine ist dauerhaft geschuetzt durch:
+- UFW
+- fail2ban
+- sshd Jail
+- Sentinel Local Agent Timer
+- read-only Helper
+
 ```text
 Cloudflare Daily Monitor -> Sentinel Defense Bot -> Hetzner Local Agent -> Sentinel Master -> Daily Mail
 ```
@@ -38,7 +47,8 @@ Privater lokaler Ubuntu-PC:
 
 - Sentinel Local Agent erzeugt lokale Reports, sobald der Rechner online ist und seine Timer laufen.
 - UFW, fail2ban, sshd Jail und read-only Helper bilden die lokale Schutzkette.
-- Der private Rechner hatte zuletzt `overall_status=OK` und keine Findings.
+- Der private Rechner hatte zuletzt `overall_status=OK` und `Findings: None`.
+- Der lokale Rechner wird geschuetzt, sobald er online ist und seine Timer laufen.
 
 ## Aktive Cloudflare-Regel
 
@@ -85,6 +95,18 @@ Wichtig:
 - `consolidate-apply-safe` wird nur nach sauberer Simulation genutzt.
 - Apply-Safe laeuft nicht unkontrolliert dauerhaft automatisch.
 
+## Zukunftsschutz
+
+- Neue Angriffe werden ueber Reports, Correlation Layer und Trend Layer erkannt.
+- Neue Massnahmen werden nicht blind automatisch gesetzt.
+- Standardzyklus: `observe -> correlate -> simulate -> apply-safe -> validate -> report`
+- Bestehende Schutzregeln sind dauerhaft aktiv.
+- Neue Regelaenderungen benoetigen Simulation und kontrolliertes `apply-safe`.
+- Keine Gegenangriffe.
+- Keine fremden Scans.
+- Keine Credential-Sammlung.
+- Keine IP-Rache.
+
 ## Daily Report
 
 Statuswerte:
@@ -109,6 +131,11 @@ Action Status:
 - `UNKNOWN`
 
 Ein `CRITICAL` bei Website-5xx kann auch nach einer Schutzregel noch sichtbar bleiben, weil Cloudflare-Reports ein rollierendes 24h-Fenster nutzen.
+
+## Lokaler Status
+
+Warum privater PC `OK` sein kann, waehrend Hetzner Local Agent `WARNING` zeigt:
+Der private PC und der Hetzner-Server sind zwei komplett getrennte Systeme. Es ist normal, dass der lokale PC `OK` meldet (da dort UFW, fail2ban, Agent Timer und SSHD Jail reibungslos funktionieren), waehrend der Hetzner-Server lokale Findings hat, die ein `WARNING` ausloesen (z.B. wenn dort `ufw status` ohne sudo nicht lesbar ist). Jeder Report spiegelt nur das isolierte System wider.
 
 ## Wichtige Dateien
 
