@@ -33,7 +33,13 @@ HISTORY_JSON = STATE_DIR / "origin_evidence_collector_history.json"
 AUDIT_JSONL = AUDIT_DIR / "sentinel-origin-evidence-collector.jsonl"
 
 SCHEMA_VERSION = "sentinel-origin-evidence-collector-1"
+ORIGIN_AGGREGATE_SCHEMA_VERSION = "sentinel-origin-window-aggregate-1"
+ORIGIN_AGGREGATE_KIND = "NOWPLAYING_ORIGIN_WINDOW_AGGREGATE"
+ORIGIN_AGGREGATE_VERIFICATION_SOURCE = (
+    "OWNER_VERIFIED_COMPLETE_NGINX_EXACT_ENDPOINT_AGGREGATION"
+)
 FILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:json|jsonl|log)$")
+SNAPSHOT_ID_RE = re.compile(r"^\d{8}-\d{6}$")
 TIMESTAMP_RE = re.compile(r"(?P<timestamp>\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-][0-2]\d:[0-5]\d)?)")
 NGINX_TIMESTAMP_RE = re.compile(r"\[(?P<timestamp>\d{2}/[A-Za-z]{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]")
 PHP_TIMESTAMP_RE = re.compile(r"\[(?P<timestamp>\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2}(?: UTC)?)\]")
@@ -45,6 +51,8 @@ PRIVATE_KEY_RE = re.compile(r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----"
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_RECORDS_PER_FILE = 5000
 MAX_TOTAL_RECORDS = 20000
+MAX_AGGREGATES = 100
+AGGREGATE_CURRENT_SECONDS = 24 * 60 * 60
 
 SOURCE_TYPES = {
     "PHP_FATAL_LOG",
@@ -221,6 +229,235 @@ def secret_bearing(text: str) -> bool:
     return bool(SECRET_RE.search(text) or PRIVATE_KEY_RE.search(text))
 
 
+def nonnegative_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result >= 0 else None
+
+
+def normalized_status_counts(value: Any) -> Optional[Dict[str, int]]:
+    if not isinstance(value, dict):
+        return None
+    result: Dict[str, int] = {}
+    for raw_status, raw_count in value.items():
+        status = str(raw_status)
+        count = nonnegative_int(raw_count)
+        if not re.fullmatch(r"[1-5]\d{2}", status) or count is None:
+            return None
+        result[status] = count
+    return dict(sorted(result.items()))
+
+
+def normalized_origin_aggregate(
+    row: Dict[str, Any], source_id: str
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Validate a complete aggregate without turning zero findings into events."""
+    findings: List[str] = []
+    if row.get("schema_version") != ORIGIN_AGGREGATE_SCHEMA_VERSION:
+        findings.append("invalid_schema_version")
+    if row.get("evidence_kind") != ORIGIN_AGGREGATE_KIND:
+        findings.append("invalid_evidence_kind")
+    if row.get("verification_source") != ORIGIN_AGGREGATE_VERIFICATION_SOURCE:
+        findings.append("unverified_source")
+
+    window_start = parse_timestamp(row.get("window_start"))
+    window_end = parse_timestamp(row.get("window_end"))
+    verified_at = parse_timestamp(row.get("verified_at"))
+    if window_start is None or window_end is None or window_start >= window_end:
+        findings.append("invalid_evidence_window")
+    if verified_at is None:
+        findings.append("invalid_verified_at")
+
+    endpoint = row.get("endpoint")
+    origin = row.get("origin")
+    snapshot_id = row.get("cloudflare_snapshot_id")
+    if not isinstance(endpoint, str) or not endpoint.startswith("/") or "?" in endpoint:
+        findings.append("invalid_endpoint")
+    if not isinstance(origin, str) or not origin.strip():
+        findings.append("invalid_origin")
+    if not isinstance(snapshot_id, str) or not SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+        findings.append("invalid_cloudflare_snapshot_id")
+
+    total = nonnegative_int(row.get("request_total"))
+    local_total = nonnegative_int(row.get("local_request_total"))
+    remote_total = nonnegative_int(row.get("remote_request_total"))
+    cloudflare_504 = nonnegative_int(row.get("cloudflare_504_count"))
+    nginx_504 = nonnegative_int(row.get("origin_nginx_504"))
+    nginx_errors = nonnegative_int(row.get("nginx_matching_error_entries"))
+    status_counts = normalized_status_counts(row.get("status_counts"))
+    local_status_counts = normalized_status_counts(row.get("local_status_counts"))
+    remote_status_counts = normalized_status_counts(row.get("remote_status_counts"))
+    numeric_values = {
+        "request_total": total,
+        "local_request_total": local_total,
+        "remote_request_total": remote_total,
+        "cloudflare_504_count": cloudflare_504,
+        "origin_nginx_504": nginx_504,
+        "nginx_matching_error_entries": nginx_errors,
+    }
+    findings.extend(name + "_invalid" for name, value in numeric_values.items() if value is None)
+    if status_counts is None:
+        findings.append("invalid_status_counts")
+    if local_status_counts is None:
+        findings.append("invalid_local_status_counts")
+    if remote_status_counts is None:
+        findings.append("invalid_remote_status_counts")
+    if total is not None and status_counts is not None and sum(status_counts.values()) != total:
+        findings.append("status_count_total_mismatch")
+    if local_total is not None and local_status_counts is not None and sum(local_status_counts.values()) != local_total:
+        findings.append("local_status_count_total_mismatch")
+    if remote_total is not None and remote_status_counts is not None and sum(remote_status_counts.values()) != remote_total:
+        findings.append("remote_status_count_total_mismatch")
+    if None not in (total, local_total, remote_total) and local_total + remote_total != total:
+        findings.append("local_remote_total_mismatch")
+    if nginx_504 is not None and status_counts is not None and status_counts.get("504", 0) != nginx_504:
+        findings.append("nginx_504_status_mismatch")
+
+    boolean_fields = (
+        "nginx_timeout_observed",
+        "upstream_timeout_observed",
+        "azuracast_failure_supported",
+        "current_direct_control_probe_succeeds",
+        "microcache_unchanged",
+        "event_level_correlation_available",
+        "cloudflare_ray_ids_available",
+    )
+    for name in boolean_fields:
+        if not isinstance(row.get(name), bool):
+            findings.append(name + "_invalid")
+
+    if findings:
+        return None, ",".join(sorted(set(findings)))
+
+    normalized = {
+        "aggregate_id": "origin-aggregate-" + canonical_hash({
+            "source_id": source_id,
+            "window_start": iso_utc(window_start),
+            "window_end": iso_utc(window_end),
+            "endpoint": endpoint,
+            "origin": origin,
+            "request_total": total,
+            "cloudflare_504_count": cloudflare_504,
+        })[:24],
+        "schema_version": ORIGIN_AGGREGATE_SCHEMA_VERSION,
+        "evidence_kind": ORIGIN_AGGREGATE_KIND,
+        "verification_source": ORIGIN_AGGREGATE_VERIFICATION_SOURCE,
+        "source_id": source_id,
+        "verified_at": iso_utc(verified_at),
+        "window_start": iso_utc(window_start),
+        "window_end": iso_utc(window_end),
+        "cloudflare_snapshot_id": snapshot_id,
+        "cloudflare_504_count": cloudflare_504,
+        "endpoint": endpoint,
+        "origin": origin,
+        "request_total": total,
+        "status_counts": status_counts,
+        "local_request_total": local_total,
+        "local_status_counts": local_status_counts,
+        "remote_request_total": remote_total,
+        "remote_status_counts": remote_status_counts,
+        "origin_nginx_504": nginx_504,
+        "nginx_matching_error_entries": nginx_errors,
+        **{name: row[name] for name in boolean_fields},
+        "azuracast_observation": (
+            "NORMAL_EXPECTED_EXIT_0_RESTART_CYCLES"
+            if row.get("azuracast_failure_supported") is False
+            else "FAILURE_SIGNAL_PRESENT"
+        ),
+        "complete_exact_endpoint_aggregation": True,
+        "raw_log_lines_stored": False,
+        "causality_proven": False,
+        "verified_user_impact": "unknown",
+    }
+    return normalized, "ok"
+
+
+def aggregate_freshness(aggregates: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
+    verified = [parse_timestamp(row.get("verified_at")) for row in aggregates]
+    valid = [item for item in verified if item is not None and item <= now]
+    if not valid:
+        return {"status": "MISSING_OR_INVALID_TIMESTAMP", "latest_verified_at": None, "age_seconds": None}
+    latest = max(valid)
+    age = max(0.0, (now - latest).total_seconds())
+    return {
+        "status": "CURRENT" if age <= AGGREGATE_CURRENT_SECONDS else "STALE_EXCLUDED_FROM_RUNTIME_PROOF",
+        "latest_verified_at": iso_utc(latest),
+        "age_seconds": round(age, 2),
+    }
+
+
+def select_origin_aggregate(
+    report: Dict[str, Any],
+    endpoint: Any,
+    origin: Any,
+    current_cloudflare_504: Any,
+    current_snapshot_id: Any,
+    current_window_start: Any = None,
+    current_window_end: Any = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Select current-compatible evidence or retain it as incident-only context."""
+    current_count = nonnegative_int(current_cloudflare_504)
+    evaluated_at = (now or utc_now_dt()).astimezone(timezone.utc)
+    current_start = parse_timestamp(current_window_start)
+    current_end = parse_timestamp(current_window_end)
+    incident_candidates: List[Dict[str, Any]] = []
+    for row in report.get("origin_aggregates", []):
+        if not isinstance(row, dict) or row.get("complete_exact_endpoint_aggregation") is not True:
+            continue
+        if row.get("endpoint") != endpoint or row.get("origin") != origin:
+            continue
+        verified_at = parse_timestamp(row.get("verified_at"))
+        if verified_at is None or verified_at > evaluated_at or (evaluated_at - verified_at).total_seconds() > AGGREGATE_CURRENT_SECONDS:
+            continue
+        incident_candidates.append(row)
+
+    if not incident_candidates:
+        return {
+            "status": "ORIGIN_AGGREGATION_EVIDENCE_MISSING",
+            "current_truth_compatible": False,
+            "incident_window_compatible": False,
+            "aggregate": None,
+            "reason": "No fresh complete exact-endpoint origin aggregate matches the endpoint and origin.",
+        }
+
+    row = max(incident_candidates, key=lambda item: item.get("verified_at", ""))
+    aggregate_start = parse_timestamp(row.get("window_start"))
+    aggregate_end = parse_timestamp(row.get("window_end"))
+    exact_snapshot = row.get("cloudflare_snapshot_id") == current_snapshot_id
+    within_current_window = bool(
+        current_start and current_end and aggregate_start and aggregate_end
+        and current_start <= aggregate_start <= aggregate_end <= current_end
+    )
+    count_match = current_count is not None and row.get("cloudflare_504_count") == current_count
+    current_compatible = count_match and (exact_snapshot or within_current_window)
+    status = (
+        "CURRENT_ORIGIN_CORRELATION_EVIDENCE"
+        if current_compatible
+        else "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE"
+    )
+    return {
+        "status": status,
+        "current_truth_compatible": current_compatible,
+        "incident_window_compatible": True,
+        "compatibility": {
+            "cloudflare_504_count_match": count_match,
+            "cloudflare_snapshot_exact": exact_snapshot,
+            "aggregate_within_current_monitor_window": within_current_window,
+        },
+        "aggregate": row,
+        "reason": (
+            "The aggregate matches the current Cloudflare count and evidence window."
+            if current_compatible
+            else "The aggregate is retained as verified incident-window evidence and is excluded from current counters."
+        ),
+    }
+
+
 def normalized_event(
     source_id: str,
     source_type: str,
@@ -306,7 +543,7 @@ def parse_structured_rows(value: Any, source_id: str) -> Tuple[List[Dict[str, An
     return events, skipped
 
 
-def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     source_id = "source-" + file_hash(path)[:20]
     metadata: Dict[str, Any] = {
         "source_id": source_id,
@@ -319,13 +556,23 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         "invalid_rows_skipped": 0,
     }
     events: List[Dict[str, Any]] = []
+    aggregates: List[Dict[str, Any]] = []
     if path.suffix == ".json":
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             metadata["status"] = "INVALID_JSON"
-            return [], metadata
-        events, skipped = parse_structured_rows(value, source_id)
+            return [], [], metadata
+        if isinstance(value, dict) and value.get("evidence_kind") == ORIGIN_AGGREGATE_KIND:
+            aggregate, aggregate_status = normalized_origin_aggregate(value, source_id)
+            if aggregate is not None:
+                aggregates.append(aggregate)
+                skipped = {"invalid_row": 0, "secret_pattern": 0}
+            else:
+                skipped = {"invalid_row": 1, "secret_pattern": 0}
+                metadata["aggregate_validation"] = aggregate_status
+        else:
+            events, skipped = parse_structured_rows(value, source_id)
         metadata["records_read"] = len(value) if isinstance(value, list) else 1
     else:
         skipped = {"invalid_row": 0, "secret_pattern": 0}
@@ -333,7 +580,7 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[:MAX_RECORDS_PER_FILE]
         except OSError:
             metadata["status"] = "READ_ERROR"
-            return [], metadata
+            return [], [], metadata
         metadata["records_read"] = len(lines)
         if path.suffix == ".jsonl":
             values: List[Any] = []
@@ -354,10 +601,11 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
                 elif status == "secret_pattern_skipped":
                     skipped["secret_pattern"] += 1
     metadata["records_emitted"] = len(events)
+    metadata["aggregates_emitted"] = len(aggregates)
     metadata["secret_rows_skipped"] = skipped["secret_pattern"]
     metadata["invalid_rows_skipped"] = skipped["invalid_row"]
     metadata["status"] = "COLLECTED"
-    return events, metadata
+    return events, aggregates, metadata
 
 
 def freshness(events: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
@@ -385,24 +633,39 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
         if path.is_file() and path.name != ".gitignore" and not safe_source_file(path)
     )
     events: List[Dict[str, Any]] = []
+    aggregates: List[Dict[str, Any]] = []
     sources: List[Dict[str, Any]] = []
     for path in files:
-        file_events, metadata = parse_file(path)
+        file_events, file_aggregates, metadata = parse_file(path)
         remaining = max(0, MAX_TOTAL_RECORDS - len(events))
         events.extend(file_events[:remaining])
+        aggregate_remaining = max(0, MAX_AGGREGATES - len(aggregates))
+        aggregates.extend(file_aggregates[:aggregate_remaining])
         sources.append(metadata)
-        if len(events) >= MAX_TOTAL_RECORDS:
+        if len(events) >= MAX_TOTAL_RECORDS and len(aggregates) >= MAX_AGGREGATES:
             break
     categories: Dict[str, int] = {}
     for event in events:
         categories[event["category"]] = categories.get(event["category"], 0) + 1
     direct = sum(1 for event in events if event["direct_evidence"])
     generated_at = utc_now()
-    evidence_freshness = freshness(events, parse_timestamp(generated_at) or utc_now_dt())
+    generated_at_dt = parse_timestamp(generated_at) or utc_now_dt()
+    event_freshness = freshness(events, generated_at_dt)
+    origin_aggregate_freshness = aggregate_freshness(aggregates, generated_at_dt)
+    evidence_freshness = (
+        origin_aggregate_freshness
+        if origin_aggregate_freshness["status"] == "CURRENT"
+        else event_freshness
+    )
+    aggregate_ready = bool(aggregates) and origin_aggregate_freshness["status"] == "CURRENT"
     report = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at,
-        "status": "ORIGIN_EVIDENCE_CURRENT" if direct and evidence_freshness["status"] == "CURRENT" else "ORIGIN_EVIDENCE_INCOMPLETE",
+        "status": (
+            "ORIGIN_EVIDENCE_CURRENT"
+            if (direct and event_freshness["status"] == "CURRENT") or aggregate_ready
+            else "ORIGIN_EVIDENCE_INCOMPLETE"
+        ),
         "report_classification": REPORT_CLASSIFICATION,
         "source_directory": "project-local-fixed-spool",
         "source_file_count": len(files),
@@ -411,6 +674,13 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
         "normalized_event_count": len(events),
         "direct_evidence_count": direct,
         "freshness": evidence_freshness,
+        "event_freshness": event_freshness,
+        "origin_aggregate_freshness": origin_aggregate_freshness,
+        "origin_aggregate_count": len(aggregates),
+        "complete_origin_aggregate_count": sum(
+            1 for row in aggregates if row.get("complete_exact_endpoint_aggregation") is True
+        ),
+        "origin_aggregates": aggregates,
         "category_counts": categories,
         "sources": sources,
         "events": events,
@@ -437,7 +707,8 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
         except (OSError, json.JSONDecodeError):
             history = []
     history.append({key: report[key] for key in (
-        "generated_at", "status", "normalized_event_count", "direct_evidence_count", "freshness", "category_counts"
+        "generated_at", "status", "normalized_event_count", "direct_evidence_count",
+        "origin_aggregate_count", "complete_origin_aggregate_count", "freshness", "category_counts"
     )})
     write_json(HISTORY_JSON, history[-200:])
     lines = [
@@ -448,6 +719,7 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
         f"- Source files: `{report['source_file_count']}`",
         f"- Normalized events: `{report['normalized_event_count']}`",
         f"- Direct evidence: `{report['direct_evidence_count']}`",
+        f"- Complete origin aggregates: `{report['complete_origin_aggregate_count']}`",
         f"- Freshness: `{report['freshness']['status']}`",
         f"- Raw log lines stored: `false`",
         f"- Causality proven: `false`",
@@ -464,6 +736,7 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
             "source_file_count": len(files),
             "normalized_event_count": len(events),
             "direct_evidence_count": direct,
+            "complete_origin_aggregate_count": report["complete_origin_aggregate_count"],
             "raw_log_lines_stored": False,
             "breach": False,
         })
@@ -490,6 +763,55 @@ def self_test() -> Dict[str, Any]:
         "NGINX_UPSTREAM_ERROR",
         None,
         '[16/Jul/2026:18:00:00 +0000] upstream timed out "GET / HTTP/1.1" 504',
+    )
+    aggregate_fixture = {
+        "schema_version": ORIGIN_AGGREGATE_SCHEMA_VERSION,
+        "evidence_kind": ORIGIN_AGGREGATE_KIND,
+        "verification_source": ORIGIN_AGGREGATE_VERIFICATION_SOURCE,
+        "verified_at": "2026-08-27T19:00:00Z",
+        "window_start": "2026-08-26T16:15:59Z",
+        "window_end": "2026-08-27T06:42:40Z",
+        "cloudflare_snapshot_id": "20260827-140232",
+        "cloudflare_504_count": 834,
+        "endpoint": "/api/nowplaying/electri-city-ai-electro-radio",
+        "origin": "203.0.113.10",
+        "request_total": 2612,
+        "status_counts": {"200": 2612},
+        "local_request_total": 1714,
+        "local_status_counts": {"200": 1714},
+        "remote_request_total": 898,
+        "remote_status_counts": {"200": 898},
+        "origin_nginx_504": 0,
+        "nginx_matching_error_entries": 0,
+        "nginx_timeout_observed": False,
+        "upstream_timeout_observed": False,
+        "azuracast_failure_supported": False,
+        "current_direct_control_probe_succeeds": True,
+        "microcache_unchanged": True,
+        "event_level_correlation_available": False,
+        "cloudflare_ray_ids_available": False,
+    }
+    aggregate, aggregate_status = normalized_origin_aggregate(aggregate_fixture, "source-test")
+    aggregate_report = {"origin_aggregates": [aggregate] if aggregate else []}
+    current_match = select_origin_aggregate(
+        aggregate_report,
+        aggregate_fixture["endpoint"],
+        aggregate_fixture["origin"],
+        834,
+        "20260827-140232",
+        "2026-08-26T14:02:32Z",
+        "2026-08-27T14:02:32Z",
+        datetime(2026, 8, 27, 19, 10, tzinfo=timezone.utc),
+    )
+    historical_match = select_origin_aggregate(
+        aggregate_report,
+        aggregate_fixture["endpoint"],
+        aggregate_fixture["origin"],
+        659,
+        "20260827-191907",
+        "2026-08-26T19:19:07Z",
+        "2026-08-27T19:19:07Z",
+        datetime(2026, 8, 27, 19, 10, tzinfo=timezone.utc),
     )
     source = Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -520,6 +842,24 @@ def self_test() -> Dict[str, Any]:
             and common_log["direct_evidence"] is True
         ),
         "path_is_fingerprinted": bool(sample) and sample["path_class"] == "frontpage" and sample["path_fingerprint"],
+        "complete_origin_aggregate_normalized": (
+            aggregate_status == "ok"
+            and bool(aggregate)
+            and aggregate["request_total"] == 2612
+            and aggregate["status_counts"] == {"200": 2612}
+            and aggregate["remote_request_total"] == 898
+            and aggregate["origin_nginx_504"] == 0
+            and aggregate["causality_proven"] is False
+        ),
+        "current_aggregate_requires_count_and_window_alignment": (
+            current_match["status"] == "CURRENT_ORIGIN_CORRELATION_EVIDENCE"
+            and current_match["current_truth_compatible"] is True
+        ),
+        "historical_aggregate_cannot_overwrite_current_truth": (
+            historical_match["status"] == "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE"
+            and historical_match["current_truth_compatible"] is False
+            and historical_match["aggregate"]["cloudflare_504_count"] == 834
+        ),
         "no_network_imports": not network_imports,
         "no_command_execution": not command_calls,
         "fixed_source_directory": SOURCE_DIR == PROJECT_DIR / "data/origin-evidence",

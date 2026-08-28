@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import sentinel_origin_evidence_collector as origin_evidence
 import sentinel_origin_route_mapper as route_mapper
 
 
@@ -1341,6 +1342,7 @@ def build_recovery(
         if dominant_row and total_504 else None
     )
 
+    origin_aggregation = origin_aggregation_for_recovery(baseline, matrix)
     recovery = {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": utc_now(),
@@ -1372,6 +1374,7 @@ def build_recovery(
             "repairability": chain.get("repairability"),
             "automatic_repair_allowed": chain.get("automatic_repair_allowed", False),
         },
+        "nowplaying_origin_aggregation": origin_aggregation,
         "users_me": {
             "primary_classification": users_me.get("primary_classification"),
             "secondary_signals": users_me.get("secondary_signals"),
@@ -1384,7 +1387,9 @@ def build_recovery(
         "counterfactual": counterfactual(focus, gate),
         "effect": effect,
         "owner_action_required": gate["status"] == "NO_SAFE_AUTOMATIC_REPAIR",
-        "remaining_evidence_gaps": evidence_gaps(matrix, chain, users_me),
+        "remaining_evidence_gaps": evidence_gaps(
+            matrix, chain, users_me, origin_aggregation
+        ),
         "breach": False,
     }
 
@@ -1401,9 +1406,48 @@ def build_recovery(
     return recovery
 
 
-def evidence_gaps(matrix: Dict[str, Any], chain: Dict[str, Any], users_me: Dict[str, Any]) -> List[str]:
+def origin_aggregation_for_recovery(
+    baseline: Dict[str, Any], matrix: Dict[str, Any]
+) -> Dict[str, Any]:
+    endpoint = baseline.get("endpoints", {}).get(NOWPLAYING_PATH, {})
+    matrix_row = next(
+        (
+            row for row in matrix.get("endpoints", [])
+            if isinstance(row, dict)
+            and row.get("endpoint") == NOWPLAYING_PATH
+            and row.get("hostname") == NOWPLAYING_HOST
+        ),
+        {},
+    )
+    snapshot_id = baseline.get("snapshot_id")
+    meta = load_dict(MONITOR_DIR / str(snapshot_id) / "meta.json") if snapshot_id else {}
+    return origin_evidence.select_origin_aggregate(
+        load_dict(origin_evidence.REPORT_JSON),
+        NOWPLAYING_PATH,
+        matrix_row.get("origin"),
+        endpoint.get("count_504"),
+        snapshot_id,
+        meta.get("since_24h_utc"),
+        meta.get("generated_at_utc"),
+    )
+
+
+def evidence_gaps(
+    matrix: Dict[str, Any],
+    chain: Dict[str, Any],
+    users_me: Dict[str, Any],
+    origin_aggregation: Optional[Dict[str, Any]] = None,
+) -> List[str]:
     gaps: List[str] = []
-    if chain.get("failure_evidence_level") != EVIDENCE_PROVEN:
+    aggregate_available = isinstance(origin_aggregation, dict) and origin_aggregation.get(
+        "incident_window_compatible"
+    ) is True
+    if aggregate_available:
+        gaps.extend([
+            "Cloudflare per-request timestamps or Ray IDs for the NowPlaying 504 responses",
+            "event-level pairing proving whether each Cloudflare 504 reached nginx",
+        ])
+    elif chain.get("failure_evidence_level") != EVIDENCE_PROVEN:
         gaps.append(
             "origin-side reverse proxy and upstream logs for the NowPlaying endpoint "
             "(required to prove which layer times out)"
@@ -1723,6 +1767,8 @@ def render_recovery(recovery: Dict[str, Any]) -> str:
     lines = private_header("Sentinel 504 Recovery")
     gate = recovery.get("repair_gate", {})
     chain = recovery.get("nowplaying_chain", {})
+    aggregation = recovery.get("nowplaying_origin_aggregation", {})
+    aggregate = aggregation.get("aggregate") if isinstance(aggregation.get("aggregate"), dict) else {}
     focus = recovery.get("primary_failure_focus", {})
     lines += [
         f"- status: `{recovery.get('status')}`",
@@ -1754,6 +1800,19 @@ def render_recovery(recovery: Dict[str, Any]) -> str:
         f"- local to Sentinel host: `{str(chain.get('origin_local_to_sentinel_host')).lower()}`",
         f"- cache layer: `{chain.get('cache_layer_verdict')}`",
         f"- {chain.get('failure_reason')}",
+        "",
+        "## Complete Origin Aggregation",
+        "",
+        f"- status: `{aggregation.get('status')}`",
+        f"- current truth compatible: `{str(aggregation.get('current_truth_compatible')).lower()}`",
+        f"- incident window compatible: `{str(aggregation.get('incident_window_compatible')).lower()}`",
+        f"- window: `{aggregate.get('window_start')}..{aggregate.get('window_end')}`",
+        f"- requests: `{aggregate.get('request_total')}`",
+        f"- status counts: `{json.dumps(aggregate.get('status_counts', {}), sort_keys=True)}`",
+        f"- remote requests: `{aggregate.get('remote_request_total')}`",
+        f"- remote status counts: `{json.dumps(aggregate.get('remote_status_counts', {}), sort_keys=True)}`",
+        f"- nginx 504: `{aggregate.get('origin_nginx_504')}`",
+        f"- causality proven: `{str(aggregate.get('causality_proven', False)).lower()}`",
         "",
         "## Failure Budget",
         "",
@@ -2165,6 +2224,37 @@ def run_self_test() -> Dict[str, Any]:
     checks["phase_10_22_tie_prefers_dominant_volume"] = (
         tie_focus["endpoint"] == NOWPLAYING_PATH
         and tie_focus["primary_failure_focus"] == "AI_RADIO_NOWPLAYING_RECOVERY"
+    )
+
+    complete_aggregate = {
+        "status": "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE",
+        "current_truth_compatible": False,
+        "incident_window_compatible": True,
+        "aggregate": {
+            "cloudflare_504_count": 834,
+            "request_total": 2612,
+            "status_counts": {"200": 2612},
+            "remote_request_total": 898,
+            "remote_status_counts": {"200": 898},
+            "origin_nginx_504": 0,
+            "causality_proven": False,
+        },
+    }
+    aggregate_gaps = evidence_gaps(
+        {"endpoints": []},
+        {"failure_evidence_level": EVIDENCE_STRONG},
+        {"missing_evidence": []},
+        complete_aggregate,
+    )
+    checks["complete_aggregate_replaces_generic_origin_log_gap"] = (
+        "event-level pairing proving whether each Cloudflare 504 reached nginx"
+        in aggregate_gaps
+        and not any("origin-side reverse proxy" in gap for gap in aggregate_gaps)
+    )
+    checks["incident_aggregate_does_not_open_repair_gate"] = (
+        complete_aggregate["current_truth_compatible"] is False
+        and complete_aggregate["aggregate"]["causality_proven"] is False
+        and unproven_gate["status"] == "NO_SAFE_AUTOMATIC_REPAIR"
     )
 
     # Structural safety.

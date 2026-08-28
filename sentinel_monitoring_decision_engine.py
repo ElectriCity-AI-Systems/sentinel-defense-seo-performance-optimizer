@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import sentinel_504_recovery as recovery
+import sentinel_origin_evidence_collector as origin_evidence
 import sentinel_origin_route_mapper as route_mapper
 
 
@@ -193,6 +194,16 @@ def latest_snapshot() -> Dict[str, Any]:
     }
 
 
+def latest_monitor_window(snapshot_id: Any) -> Dict[str, Any]:
+    if not isinstance(snapshot_id, str) or not SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+        return {"window_start": None, "window_end": None}
+    meta = load_dict(MONITOR_DIR / snapshot_id / "meta.json")
+    return {
+        "window_start": meta.get("since_24h_utc"),
+        "window_end": meta.get("generated_at_utc"),
+    }
+
+
 def report_snapshot_id(payload: Dict[str, Any]) -> Optional[str]:
     rolling = payload.get("rolling_window_context")
     candidates: List[Any] = []
@@ -334,6 +345,8 @@ def refresh_once(force: bool = False) -> Dict[str, Any]:
     if report_snapshot_id(load_dict(WEBSITE_REPORT_JSON)) != target:
         website_refresh = run_website_observe()
 
+    origin_evidence_report = origin_evidence.collect(write_audit=False)
+
     route_refreshed = route_refresh_needed(force, target)
     route_status = load_dict(route_mapper.ROUTE_MAP_JSON).get("status", "NOT_RUN")
     if route_refreshed:
@@ -357,6 +370,10 @@ def refresh_once(force: bool = False) -> Dict[str, Any]:
         "finished_snapshot": after,
         "snapshot_changed_during_refresh": before.get("snapshot_id") != after.get("snapshot_id"),
         "website_refresh": website_refresh,
+        "origin_evidence_status": origin_evidence_report.get("status"),
+        "complete_origin_aggregate_count": origin_evidence_report.get(
+            "complete_origin_aggregate_count", 0
+        ),
         "route_evidence_refreshed": route_refreshed,
         "route_status": route_status,
         "recovery_evidence_refreshed": recovery_refreshed,
@@ -397,7 +414,11 @@ def origin_access_status(ownership: Dict[str, Any], origin: Any) -> Dict[str, An
     }
 
 
-def classify_failure_boundary(row: Dict[str, Any], chain: Dict[str, Any]) -> Dict[str, Any]:
+def classify_failure_boundary(
+    row: Dict[str, Any],
+    chain: Dict[str, Any],
+    origin_aggregation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     count_value = row.get("current_504")
     count_504 = (
         int(count_value)
@@ -408,29 +429,82 @@ def classify_failure_boundary(row: Dict[str, Any], chain: Dict[str, Any]) -> Dic
     status_code = probe.get("status_code")
     timed_out = probe.get("timed_out") is True
     error = probe.get("error")
+    aggregation = origin_aggregation if isinstance(origin_aggregation, dict) else {}
+    aggregate = aggregation.get("aggregate") if isinstance(aggregation.get("aggregate"), dict) else {}
+    aggregation_available = aggregation.get("status") in {
+        "CURRENT_ORIGIN_CORRELATION_EVIDENCE",
+        "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE",
+    }
+    all_origin_2xx = (
+        isinstance(aggregate.get("request_total"), int)
+        and aggregate.get("request_total", 0) > 0
+        and isinstance(aggregate.get("remote_request_total"), int)
+        and aggregate.get("remote_request_total", 0) > 0
+        and bool(aggregate.get("status_counts"))
+        and bool(aggregate.get("remote_status_counts"))
+        and all(
+            str(status).startswith("2") or count == 0
+            for status, count in aggregate.get("status_counts", {}).items()
+        )
+        and all(
+            str(status).startswith("2") or count == 0
+            for status, count in aggregate.get("remote_status_counts", {}).items()
+        )
+    )
+    direct_probe_healthy = (
+        isinstance(status_code, int) and 200 <= status_code < 400 and not timed_out
+    )
+    aggregate_has_no_timeout_signal = (
+        aggregate.get("origin_nginx_504") == 0
+        and aggregate.get("nginx_matching_error_entries") == 0
+        and aggregate.get("nginx_timeout_observed") is False
+        and aggregate.get("upstream_timeout_observed") is False
+        and aggregate.get("azuracast_failure_supported") is False
+    )
 
     if count_504 is None:
         layer = "NOWPLAYING_EVIDENCE_INSUFFICIENT"
+        failure_boundary = "INSUFFICIENT_EVIDENCE"
         evidence = "INSUFFICIENT"
         exact = False
         reason = "Current endpoint-specific NowPlaying 504 evidence is missing or unresolved."
     elif count_504 == 0:
         layer = "NO_CURRENT_NOWPLAYING_504"
+        failure_boundary = "NO_CURRENT_FAILURE_BOUNDARY"
         evidence = "PROVEN"
         exact = True
         reason = "The aligned current monitor snapshot contains no NowPlaying 504."
+    elif (
+        aggregation_available
+        and all_origin_2xx
+        and aggregate_has_no_timeout_signal
+        and direct_probe_healthy
+    ):
+        layer = "INSUFFICIENT_EVIDENCE"
+        failure_boundary = "CF_ORIGIN_PATH_INTERMITTENCY"
+        evidence = "STRONG"
+        exact = False
+        reason = (
+            "The complete exact-endpoint nginx aggregation contains only HTTP 200, including all observed remote "
+            "requests, with no nginx, upstream or AzuraCast failure signal. Cloudflare 504 rows have no event "
+            "timestamps or Ray IDs, so this supports an intermittent Cloudflare-to-origin boundary but cannot prove "
+            "whether each failed edge request reached nginx."
+        )
     elif timed_out:
         layer = "DIRECT_ORIGIN_CONNECTION_OR_RESPONSE_TIMEOUT"
+        failure_boundary = "ORIGIN_OR_UPSTREAM_TIMEOUT_REPRODUCED"
         evidence = "PROVEN"
         exact = True
         reason = "The fixed direct-origin probe reproduced a timeout for the same first-party host and path."
     elif isinstance(status_code, int) and 500 <= status_code < 600:
         layer = "DIRECT_ORIGIN_OR_UPSTREAM_SERVER_FAILURE"
+        failure_boundary = "ORIGIN_OR_UPSTREAM_SERVER_FAILURE"
         evidence = "STRONG"
         exact = False
         reason = "The fixed direct-origin probe reproduced a server failure, but origin logs are needed for its internal layer."
     elif isinstance(status_code, int) and 200 <= status_code < 400:
-        layer = "INTERMITTENT_CLOUDFLARE_TO_ORIGIN_OR_ORIGIN_UPSTREAM_PATH"
+        layer = "INSUFFICIENT_EVIDENCE"
+        failure_boundary = "CF_ORIGIN_PATH_INTERMITTENCY"
         evidence = "STRONG"
         exact = False
         reason = (
@@ -440,18 +514,22 @@ def classify_failure_boundary(row: Dict[str, Any], chain: Dict[str, Any]) -> Dic
         )
     elif error:
         layer = "ORIGIN_PROBE_EVIDENCE_UNAVAILABLE"
+        failure_boundary = "INSUFFICIENT_EVIDENCE"
         evidence = "INSUFFICIENT"
         exact = False
         reason = "The fixed direct-origin probe did not produce usable current evidence."
     else:
         layer = "FAILURE_LAYER_UNPROVEN"
+        failure_boundary = "INSUFFICIENT_EVIDENCE"
         evidence = "INSUFFICIENT"
         exact = False
         reason = "No direct evidence identifies a single failing layer."
 
     return {
         "failure_layer": layer,
+        "failure_boundary": failure_boundary,
         "confidence": evidence,
+        "confidence_scope": "FAILURE_BOUNDARY" if not exact and evidence == "STRONG" else "FAILURE_LAYER",
         "exact_failure_layer_proven": exact,
         "causality_proven": exact and layer != "NO_CURRENT_NOWPLAYING_504",
         "reason": reason,
@@ -463,6 +541,7 @@ def classify_failure_boundary(row: Dict[str, Any], chain: Dict[str, Any]) -> Dic
             "tls_verified": probe.get("tls_verified"),
             "response_body_stored": False,
         },
+        "origin_aggregation_status": aggregation.get("status") or "ORIGIN_AGGREGATION_EVIDENCE_MISSING",
     }
 
 
@@ -472,7 +551,19 @@ def build_correlation() -> Dict[str, Any]:
     ownership = load_dict(route_mapper.OWNERSHIP_JSON)
     recovery_report = load_dict(recovery.RECOVERY_JSON)
     row = nowplaying_row(matrix)
-    boundary = classify_failure_boundary(row, chain)
+    snapshot_id = matrix_snapshot_id(matrix)
+    monitor_window = latest_monitor_window(snapshot_id)
+    collected_origin_evidence = load_dict(origin_evidence.REPORT_JSON)
+    aggregate_selection = origin_evidence.select_origin_aggregate(
+        collected_origin_evidence,
+        NOWPLAYING_PATH,
+        row.get("origin"),
+        row.get("current_504"),
+        snapshot_id,
+        monitor_window.get("window_start"),
+        monitor_window.get("window_end"),
+    )
+    boundary = classify_failure_boundary(row, chain, aggregate_selection)
     access = origin_access_status(ownership, row.get("origin"))
     baseline = recovery_report.get("baseline") if isinstance(recovery_report.get("baseline"), dict) else {}
     endpoint = baseline.get("endpoints", {}).get(NOWPLAYING_PATH, {}) if isinstance(baseline.get("endpoints"), dict) else {}
@@ -484,7 +575,7 @@ def build_correlation() -> Dict[str, Any]:
         "status": "CLOUDFLARE_ORIGIN_CORRELATION_COMPLETE" if row else "CLOUDFLARE_ORIGIN_CORRELATION_INCOMPLETE",
         "report_classification": REPORT_CLASSIFICATION,
         "execution_boundaries": EXECUTION_BOUNDARIES,
-        "snapshot_id": matrix_snapshot_id(matrix),
+        "snapshot_id": snapshot_id,
         "endpoint": NOWPLAYING_PATH,
         "hostname": NOWPLAYING_HOST,
         "authoritative_origin": row.get("origin"),
@@ -497,16 +588,24 @@ def build_correlation() -> Dict[str, Any]:
         "new_504_lower_bound_15m": rates.get("15m", {}).get("new_errors_lower_bound") if isinstance(rates.get("15m"), dict) else None,
         "new_504_lower_bound_60m": rates.get("60m", {}).get("new_errors_lower_bound") if isinstance(rates.get("60m"), dict) else None,
         "failure_boundary": boundary,
+        "origin_aggregation": aggregate_selection,
         "origin_access": access,
         "verified_user_impact": "unknown",
         "new_waf_rule_recommended": False,
         "automatic_repair_allowed": False,
         "repair_gate": "NO_REPAIR_WITHOUT_PROVEN_CAUSE_EXACT_SCOPE_AND_ROLLBACK",
-        "missing_evidence": [
-            "origin reverse-proxy request/error log rows for the affected timestamps",
-            "origin upstream/application timing and failure rows for the affected timestamps",
-            "request-id or timestamp correlation between Cloudflare 504 and origin handling",
-        ] if not boundary["exact_failure_layer_proven"] else [],
+        "missing_evidence": (
+            [
+                "Cloudflare per-request timestamps or Ray IDs for the 504 responses",
+                "event-level pairing proving whether each Cloudflare 504 reached nginx",
+            ]
+            if aggregate_selection.get("incident_window_compatible") is True
+            else [
+                "origin reverse-proxy request/error log rows for the affected timestamps",
+                "origin upstream/application timing and failure rows for the affected timestamps",
+                "request-id or timestamp correlation between Cloudflare 504 and origin handling",
+            ]
+        ) if not boundary["exact_failure_layer_proven"] else [],
     }
 
 
@@ -542,6 +641,11 @@ def select_monitoring_decision(
     boundary = correlation.get("failure_boundary", {})
     rate_15m = correlation.get("new_504_lower_bound_15m")
     rate_60m = correlation.get("new_504_lower_bound_60m")
+    aggregate_status = correlation.get("origin_aggregation", {}).get("status")
+    aggregate_available = aggregate_status in {
+        "CURRENT_ORIGIN_CORRELATION_EVIDENCE",
+        "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE",
+    }
 
     safety_findings: List[str] = []
     if safety.get("breach") is True:
@@ -575,6 +679,14 @@ def select_monitoring_decision(
         decision = "NO_ACTION"
         next_diagnostic = "CONTINUE_SCHEDULED_MONITORING"
         reason = "The aligned current snapshot contains no NowPlaying 504 and no productive action is justified."
+    elif aggregate_available:
+        decision = "OWNER_ACTION_REQUIRED"
+        next_diagnostic = "OBTAIN_EVENT_LEVEL_CLOUDFLARE_ORIGIN_CORRELATION"
+        reason = (
+            "Complete exact-endpoint origin aggregation shows only HTTP 200 and no nginx/upstream/AzuraCast timeout "
+            "signal, but Cloudflare lacks per-request timestamps or Ray IDs. Event-level correlation remains required; "
+            "no productive repair is justified."
+        )
     elif access == "REMOTE_OWNER_ACTION_REQUIRED":
         decision = "OWNER_ACTION_REQUIRED"
         next_diagnostic = "CORRELATE_ORIGIN_LOGS_READ_ONLY"
@@ -700,6 +812,8 @@ def render_refresh(result: Dict[str, Any]) -> str:
 def render_correlation(correlation: Dict[str, Any]) -> str:
     boundary = correlation.get("failure_boundary", {})
     access = correlation.get("origin_access", {})
+    aggregation = correlation.get("origin_aggregation", {})
+    aggregate = aggregation.get("aggregate") if isinstance(aggregation.get("aggregate"), dict) else {}
     lines = private_header("Sentinel NowPlaying Cloudflare-Origin Correlation")
     lines += [
         f"- status: `{correlation.get('status')}`",
@@ -710,10 +824,21 @@ def render_correlation(correlation: Dict[str, Any]) -> str:
         f"- requests 24h: `{correlation.get('requests_24h')}`",
         f"- failure ratio: `{correlation.get('failure_ratio_percent')}%`",
         f"- failure layer: `{boundary.get('failure_layer')}`",
+        f"- failure boundary: `{boundary.get('failure_boundary')}`",
         f"- confidence: `{boundary.get('confidence')}`",
         f"- exact layer proven: `{str(boundary.get('exact_failure_layer_proven')).lower()}`",
         f"- causality proven: `{str(boundary.get('causality_proven')).lower()}`",
         f"- origin access: `{access.get('status')}`",
+        f"- origin aggregation: `{aggregation.get('status')}`",
+        f"- origin aggregation window: `{aggregate.get('window_start')}..{aggregate.get('window_end')}`",
+        f"- origin requests: `{aggregate.get('request_total')}`",
+        f"- origin status counts: `{json.dumps(aggregate.get('status_counts', {}), sort_keys=True)}`",
+        f"- remote origin requests: `{aggregate.get('remote_request_total')}`",
+        f"- remote origin status counts: `{json.dumps(aggregate.get('remote_status_counts', {}), sort_keys=True)}`",
+        f"- origin nginx 504: `{aggregate.get('origin_nginx_504')}`",
+        f"- nginx timeout observed: `{aggregate.get('nginx_timeout_observed')}`",
+        f"- upstream timeout observed: `{aggregate.get('upstream_timeout_observed')}`",
+        f"- event-level correlation available: `{aggregate.get('event_level_correlation_available')}`",
         f"- verified user impact: `{correlation.get('verified_user_impact')}`",
         f"- reason: {boundary.get('reason')}",
         "",
@@ -860,6 +985,14 @@ def validate() -> Dict[str, Any]:
         findings.append("productive_execution_detected")
     if report.get("correlation", {}).get("new_waf_rule_recommended") is not False:
         findings.append("waf_recommendation_not_false")
+    correlation = report.get("correlation", {})
+    aggregation = correlation.get("origin_aggregation", {})
+    if aggregation.get("incident_window_compatible") is True:
+        boundary = correlation.get("failure_boundary", {})
+        if boundary.get("failure_layer") != "INSUFFICIENT_EVIDENCE":
+            findings.append("origin_aggregate_overclaimed_failure_layer")
+        if boundary.get("causality_proven") is not False:
+            findings.append("origin_aggregate_overclaimed_causality")
     if report.get("breach") is True:
         findings.append("breach_true")
     return {
@@ -890,12 +1023,46 @@ def self_test() -> Dict[str, Any]:
         "origin_probe": {"status_code": 200, "latency_ms": 12.0, "timed_out": False, "tls_verified": False},
     }
     boundary = classify_failure_boundary({"current_504": 762}, healthy_probe)
+    aggregate_selection = {
+        "status": "CURRENT_ORIGIN_CORRELATION_EVIDENCE",
+        "current_truth_compatible": True,
+        "incident_window_compatible": True,
+        "aggregate": {
+            "request_total": 2612,
+            "status_counts": {"200": 2612},
+            "local_request_total": 1714,
+            "local_status_counts": {"200": 1714},
+            "remote_request_total": 898,
+            "remote_status_counts": {"200": 898},
+            "origin_nginx_504": 0,
+            "nginx_matching_error_entries": 0,
+            "nginx_timeout_observed": False,
+            "upstream_timeout_observed": False,
+            "azuracast_failure_supported": False,
+            "event_level_correlation_available": False,
+        },
+    }
+    aggregate_boundary = classify_failure_boundary(
+        {"current_504": 834}, healthy_probe, aggregate_selection
+    )
     owner = select_monitoring_decision(
         aligned,
         {
             "cloudflare_504": 762,
             "origin_access": {"status": "REMOTE_OWNER_ACTION_REQUIRED"},
             "failure_boundary": boundary,
+            "new_504_lower_bound_15m": 0,
+            "new_504_lower_bound_60m": 0,
+        },
+        safe,
+    )
+    aggregate_owner = select_monitoring_decision(
+        aligned,
+        {
+            "cloudflare_504": 834,
+            "origin_access": {"status": "REMOTE_OWNER_ACTION_REQUIRED"},
+            "origin_aggregation": aggregate_selection,
+            "failure_boundary": aggregate_boundary,
             "new_504_lower_bound_15m": 0,
             "new_504_lower_bound_60m": 0,
         },
@@ -940,6 +1107,21 @@ def self_test() -> Dict[str, Any]:
         "healthy_point_probe_not_overclaimed": (
             boundary["exact_failure_layer_proven"] is False
             and boundary["confidence"] == "STRONG"
+            and boundary["failure_layer"] == "INSUFFICIENT_EVIDENCE"
+            and boundary["failure_boundary"] == "CF_ORIGIN_PATH_INTERMITTENCY"
+        ),
+        "complete_origin_aggregate_remains_fail_closed": (
+            aggregate_boundary["failure_layer"] == "INSUFFICIENT_EVIDENCE"
+            and aggregate_boundary["failure_boundary"] == "CF_ORIGIN_PATH_INTERMITTENCY"
+            and aggregate_boundary["confidence"] == "STRONG"
+            and aggregate_boundary["causality_proven"] is False
+            and aggregate_boundary["exact_failure_layer_proven"] is False
+        ),
+        "origin_aggregate_selects_event_level_gap": (
+            aggregate_owner["decision"] == "OWNER_ACTION_REQUIRED"
+            and aggregate_owner["execution"] == "NO_ACTION"
+            and aggregate_owner["next_read_only_diagnostic"]
+            == "OBTAIN_EVENT_LEVEL_CLOUDFLARE_ORIGIN_CORRELATION"
         ),
         "remote_origin_owner_gated": owner["decision"] == "OWNER_ACTION_REQUIRED",
         "zero_current_504_no_action": no_action["decision"] == "NO_ACTION",
@@ -949,7 +1131,8 @@ def self_test() -> Dict[str, Any]:
             and unresolved["decision"] == "MONITOR_CONTINUE"
         ),
         "all_decisions_non_productive": all(
-            row["execution"] == "NO_ACTION" for row in (owner, no_action, unresolved, mismatch)
+            row["execution"] == "NO_ACTION"
+            for row in (owner, aggregate_owner, no_action, unresolved, mismatch)
         ),
         "no_new_waf_rule": owner["new_waf_rule_recommended"] is False,
         "low_live_unchanged": EXECUTION_BOUNDARIES["low_live_activation"] is False,
@@ -976,6 +1159,7 @@ def print_status(report: Dict[str, Any]) -> None:
     print(f"snapshot_id={report.get('evidence_window', {}).get('snapshot_ids', {}).get('latest_monitor_snapshot')}")
     print(f"decision={report.get('autonomous_decision', {}).get('decision')}")
     print(f"failure_layer={report.get('correlation', {}).get('failure_boundary', {}).get('failure_layer')}")
+    print(f"failure_boundary={report.get('correlation', {}).get('failure_boundary', {}).get('failure_boundary')}")
     print(f"confidence={report.get('correlation', {}).get('failure_boundary', {}).get('confidence')}")
     print(f"causality_proven={str(report.get('correlation', {}).get('failure_boundary', {}).get('causality_proven')).lower()}")
     print(f"low_live_enabled={str(report.get('runtime_safety', {}).get('low_live_apply_enabled')).lower()}")

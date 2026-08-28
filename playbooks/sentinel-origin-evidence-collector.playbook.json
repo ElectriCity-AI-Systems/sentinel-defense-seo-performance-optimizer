@@ -9,6 +9,7 @@
     "log"
   ],
   "recognized_evidence": [
+    "complete_exact_endpoint_origin_window_aggregate",
     "php_fatal",
     "wordpress_application_error",
     "origin_upstream_timeout",
@@ -22,6 +23,20 @@
     "file_names_stored": false,
     "paths_fingerprinted": true,
     "secret_rows_skipped": true
+  },
+  "aggregate_contract": {
+    "evidence_kind": "NOWPLAYING_ORIGIN_WINDOW_AGGREGATE",
+    "requires": [
+      "verified evidence window",
+      "Cloudflare reference snapshot and 504 count",
+      "exact endpoint and origin",
+      "total/local/remote status counts",
+      "nginx and upstream timeout observations",
+      "event-level correlation availability"
+    ],
+    "current_truth_rule": "Current counters are compatible only when Cloudflare count and snapshot/window align.",
+    "historical_rule": "Incident-window evidence remains visible but cannot overwrite current truth.",
+    "causality_proven": false
   },
   "remote_access": false,
   "production_write": false,

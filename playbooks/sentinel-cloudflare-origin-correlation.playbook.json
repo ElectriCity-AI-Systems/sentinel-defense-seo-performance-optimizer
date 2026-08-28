@@ -1,5 +1,15 @@
 {
-  "causality_rule": "a healthy point probe never proves the historical internal failure layer",
+  "causality_rule": "a healthy point probe or aggregate-only origin result never proves the event-level internal failure layer",
+  "aggregate_rule": {
+    "all_origin_2xx_with_no_timeout_signal": {
+      "failure_layer": "INSUFFICIENT_EVIDENCE",
+      "failure_boundary": "CF_ORIGIN_PATH_INTERMITTENCY",
+      "confidence": "STRONG",
+      "causality_proven": false
+    },
+    "remaining_gap": "Cloudflare per-request timestamps or Ray IDs paired with origin handling",
+    "historical_evidence_cannot_overwrite_current_truth": true
+  },
   "decisions": [
     "NO_ACTION",
     "MONITOR_CONTINUE",

@@ -332,6 +332,18 @@ def collect_consistency(canonical: Dict[str, Any]) -> Dict[str, Any]:
 
 def collect_origin_diagnostics(canonical: Dict[str, Any]) -> Dict[str, Any]:
     data = load_dict(REPORT_DIR / "sentinel-origin-failure-diagnostics.json")
+    correlation = load_dict(
+        REPORT_DIR / "sentinel-nowplaying-cloudflare-origin-correlation.json"
+    )
+    origin_aggregation = correlation.get("origin_aggregation") if isinstance(
+        correlation.get("origin_aggregation"), dict
+    ) else {}
+    aggregate = origin_aggregation.get("aggregate") if isinstance(
+        origin_aggregation.get("aggregate"), dict
+    ) else {}
+    failure_boundary = correlation.get("failure_boundary") if isinstance(
+        correlation.get("failure_boundary"), dict
+    ) else {}
     block = canonical.get("origin_diagnostic_status") if isinstance(
         canonical.get("origin_diagnostic_status"), dict
     ) else {}
@@ -365,6 +377,24 @@ def collect_origin_diagnostics(canonical: Dict[str, Any]) -> Dict[str, Any]:
             "compatible_current_evidence", False
         ),
         "wp_users_me_productive_rule_applied": wp_users_me.get("productive_rule_applied", False),
+        "nowplaying_failure_layer": failure_boundary.get("failure_layer"),
+        "nowplaying_failure_boundary": failure_boundary.get("failure_boundary"),
+        "nowplaying_failure_confidence": failure_boundary.get("confidence"),
+        "nowplaying_causality_proven": failure_boundary.get("causality_proven", False),
+        "nowplaying_origin_aggregation_status": origin_aggregation.get("status"),
+        "nowplaying_origin_aggregation_current_truth_compatible": (
+            origin_aggregation.get("current_truth_compatible", False)
+        ),
+        "nowplaying_origin_aggregation_incident_window_compatible": (
+            origin_aggregation.get("incident_window_compatible", False)
+        ),
+        "nowplaying_origin_request_total": aggregate.get("request_total"),
+        "nowplaying_origin_status_counts": aggregate.get("status_counts"),
+        "nowplaying_remote_origin_request_total": aggregate.get("remote_request_total"),
+        "nowplaying_remote_origin_status_counts": aggregate.get("remote_status_counts"),
+        "nowplaying_origin_nginx_504": aggregate.get("origin_nginx_504"),
+        "nowplaying_nginx_timeout_observed": aggregate.get("nginx_timeout_observed"),
+        "nowplaying_upstream_timeout_observed": aggregate.get("upstream_timeout_observed"),
     }
 
 
