@@ -341,6 +341,12 @@ def collect_origin_diagnostics(canonical: Dict[str, Any]) -> Dict[str, Any]:
     aggregate = origin_aggregation.get("aggregate") if isinstance(
         origin_aggregation.get("aggregate"), dict
     ) else {}
+    cloudflare_event_evidence = correlation.get("cloudflare_event_evidence") if isinstance(
+        correlation.get("cloudflare_event_evidence"), dict
+    ) else {}
+    cloudflare_event_window = cloudflare_event_evidence.get("event_window") if isinstance(
+        cloudflare_event_evidence.get("event_window"), dict
+    ) else {}
     failure_boundary = correlation.get("failure_boundary") if isinstance(
         correlation.get("failure_boundary"), dict
     ) else {}
@@ -395,6 +401,42 @@ def collect_origin_diagnostics(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "nowplaying_origin_nginx_504": aggregate.get("origin_nginx_504"),
         "nowplaying_nginx_timeout_observed": aggregate.get("nginx_timeout_observed"),
         "nowplaying_upstream_timeout_observed": aggregate.get("upstream_timeout_observed"),
+        "nowplaying_cloudflare_event_evidence_status": cloudflare_event_evidence.get("status"),
+        "nowplaying_cloudflare_event_current_truth_compatible": (
+            cloudflare_event_evidence.get("current_truth_compatible", False)
+        ),
+        "nowplaying_cloudflare_event_incident_window_compatible": (
+            cloudflare_event_evidence.get("incident_window_compatible", False)
+        ),
+        "nowplaying_cloudflare_event_count": cloudflare_event_window.get("event_count"),
+        "nowplaying_cloudflare_weighted_event_count": cloudflare_event_window.get(
+            "weighted_aggregate_count"
+        ),
+        "nowplaying_cloudflare_average_sample_interval": cloudflare_event_window.get(
+            "average_sample_interval"
+        ),
+        "nowplaying_cloudflare_events_with_timestamp": cloudflare_event_window.get(
+            "events_with_timestamp"
+        ),
+        "nowplaying_cloudflare_events_with_ray_id": cloudflare_event_window.get(
+            "events_with_ray_id"
+        ),
+        "nowplaying_cloudflare_event_classifications": cloudflare_event_window.get(
+            "classification_totals"
+        ),
+        "nowplaying_cloudflare_request_source_counts": cloudflare_event_window.get(
+            "request_source_counts"
+        ),
+        "nowplaying_cloudflare_origin_status_counts": cloudflare_event_window.get(
+            "origin_status_counts"
+        ),
+        "nowplaying_cloudflare_event_correlation_possible": cloudflare_event_window.get(
+            "event_correlation_possible"
+        ),
+        "nowplaying_cloudflare_event_coverage_complete": cloudflare_event_window.get(
+            "complete_event_coverage"
+        ),
+        "nowplaying_cloudflare_logpull_status": cloudflare_event_window.get("logpull_status"),
     }
 
 

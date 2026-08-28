@@ -418,6 +418,7 @@ def classify_failure_boundary(
     row: Dict[str, Any],
     chain: Dict[str, Any],
     origin_aggregation: Optional[Dict[str, Any]] = None,
+    cloudflare_event_evidence: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     count_value = row.get("current_504")
     count_504 = (
@@ -431,6 +432,20 @@ def classify_failure_boundary(
     error = probe.get("error")
     aggregation = origin_aggregation if isinstance(origin_aggregation, dict) else {}
     aggregate = aggregation.get("aggregate") if isinstance(aggregation.get("aggregate"), dict) else {}
+    event_evidence = (
+        cloudflare_event_evidence
+        if isinstance(cloudflare_event_evidence, dict)
+        else {}
+    )
+    event_window = (
+        event_evidence.get("event_window")
+        if isinstance(event_evidence.get("event_window"), dict)
+        else {}
+    )
+    event_evidence_available = event_evidence.get("status") in {
+        "CURRENT_CLOUDFLARE_EVENT_EVIDENCE",
+        "INCIDENT_WINDOW_CLOUDFLARE_EVENT_EVIDENCE",
+    }
     aggregation_available = aggregation.get("status") in {
         "CURRENT_ORIGIN_CORRELATION_EVIDENCE",
         "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE",
@@ -484,12 +499,21 @@ def classify_failure_boundary(
         failure_boundary = "CF_ORIGIN_PATH_INTERMITTENCY"
         evidence = "STRONG"
         exact = False
-        reason = (
-            "The complete exact-endpoint nginx aggregation contains only HTTP 200, including all observed remote "
-            "requests, with no nginx, upstream or AzuraCast failure signal. Cloudflare 504 rows have no event "
-            "timestamps or Ray IDs, so this supports an intermittent Cloudflare-to-origin boundary but cannot prove "
-            "whether each failed edge request reached nginx."
-        )
+        if event_evidence_available and event_window.get("event_count", 0) > 0:
+            reason = (
+                f"Cloudflare exposes {event_window.get('event_count')} exact-path 504 event rows with UTC timestamps, "
+                "origin response status 0 and zero recorded origin timings. The complete nginx window contains only "
+                "HTTP 200 and no timeout signal, but no event-level nginx rows or Ray IDs are available for pairing. "
+                "This strongly supports an intermittent Cloudflare-to-origin boundary without proving which requests "
+                "reached nginx or one exact failure layer."
+            )
+        else:
+            reason = (
+                "The complete exact-endpoint nginx aggregation contains only HTTP 200, including all observed remote "
+                "requests, with no nginx, upstream or AzuraCast failure signal. Cloudflare 504 rows have no event "
+                "timestamps or Ray IDs, so this supports an intermittent Cloudflare-to-origin boundary but cannot prove "
+                "whether each failed edge request reached nginx."
+            )
     elif timed_out:
         layer = "DIRECT_ORIGIN_CONNECTION_OR_RESPONSE_TIMEOUT"
         failure_boundary = "ORIGIN_OR_UPSTREAM_TIMEOUT_REPRODUCED"
@@ -542,6 +566,9 @@ def classify_failure_boundary(
             "response_body_stored": False,
         },
         "origin_aggregation_status": aggregation.get("status") or "ORIGIN_AGGREGATION_EVIDENCE_MISSING",
+        "cloudflare_event_evidence_status": (
+            event_evidence.get("status") or "CLOUDFLARE_EVENT_EVIDENCE_MISSING"
+        ),
     }
 
 
@@ -563,7 +590,18 @@ def build_correlation() -> Dict[str, Any]:
         monitor_window.get("window_start"),
         monitor_window.get("window_end"),
     )
-    boundary = classify_failure_boundary(row, chain, aggregate_selection)
+    cloudflare_event_selection = origin_evidence.select_cloudflare_event_window(
+        collected_origin_evidence,
+        NOWPLAYING_PATH,
+        NOWPLAYING_HOST,
+        row.get("current_504"),
+        snapshot_id,
+        monitor_window.get("window_start"),
+        monitor_window.get("window_end"),
+    )
+    boundary = classify_failure_boundary(
+        row, chain, aggregate_selection, cloudflare_event_selection
+    )
     access = origin_access_status(ownership, row.get("origin"))
     baseline = recovery_report.get("baseline") if isinstance(recovery_report.get("baseline"), dict) else {}
     endpoint = baseline.get("endpoints", {}).get(NOWPLAYING_PATH, {}) if isinstance(baseline.get("endpoints"), dict) else {}
@@ -589,6 +627,7 @@ def build_correlation() -> Dict[str, Any]:
         "new_504_lower_bound_60m": rates.get("60m", {}).get("new_errors_lower_bound") if isinstance(rates.get("60m"), dict) else None,
         "failure_boundary": boundary,
         "origin_aggregation": aggregate_selection,
+        "cloudflare_event_evidence": cloudflare_event_selection,
         "origin_access": access,
         "verified_user_impact": "unknown",
         "new_waf_rule_recommended": False,
@@ -596,6 +635,12 @@ def build_correlation() -> Dict[str, Any]:
         "repair_gate": "NO_REPAIR_WITHOUT_PROVEN_CAUSE_EXACT_SCOPE_AND_ROLLBACK",
         "missing_evidence": (
             [
+                "bounded exact-path nginx access rows for the Cloudflare event timestamps",
+                "event-level timestamp pairing proving whether each Cloudflare 504 reached nginx",
+                "Ray IDs are unavailable in the enabled httpRequestsAdaptive field set",
+            ]
+            if cloudflare_event_selection.get("incident_window_compatible") is True
+            else [
                 "Cloudflare per-request timestamps or Ray IDs for the 504 responses",
                 "event-level pairing proving whether each Cloudflare 504 reached nginx",
             ]
@@ -646,6 +691,19 @@ def select_monitoring_decision(
         "CURRENT_ORIGIN_CORRELATION_EVIDENCE",
         "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE",
     }
+    cloudflare_events = correlation.get("cloudflare_event_evidence", {})
+    cloudflare_event_window = (
+        cloudflare_events.get("event_window")
+        if isinstance(cloudflare_events.get("event_window"), dict)
+        else {}
+    )
+    cloudflare_event_data_available = (
+        cloudflare_events.get("status") in {
+            "CURRENT_CLOUDFLARE_EVENT_EVIDENCE",
+            "INCIDENT_WINDOW_CLOUDFLARE_EVENT_EVIDENCE",
+        }
+        and cloudflare_event_window.get("event_count", 0) > 0
+    )
 
     safety_findings: List[str] = []
     if safety.get("breach") is True:
@@ -679,6 +737,16 @@ def select_monitoring_decision(
         decision = "NO_ACTION"
         next_diagnostic = "CONTINUE_SCHEDULED_MONITORING"
         reason = "The aligned current snapshot contains no NowPlaying 504 and no productive action is justified."
+    elif cloudflare_event_data_available and not cloudflare_event_window.get(
+        "event_correlation_possible", False
+    ):
+        decision = "OWNER_ACTION_REQUIRED"
+        next_diagnostic = "CORRELATE_CLOUDFLARE_TIMESTAMPS_WITH_ORIGIN_LOGS_READ_ONLY"
+        reason = (
+            f"Cloudflare provides {cloudflare_event_window.get('event_count')} exact-path 504 timestamps, but the "
+            "fixed read-only origin interface did not provide matching nginx event rows. All events remain "
+            "INSUFFICIENT_EVIDENCE and no productive repair is justified."
+        )
     elif aggregate_available:
         decision = "OWNER_ACTION_REQUIRED"
         next_diagnostic = "OBTAIN_EVENT_LEVEL_CLOUDFLARE_ORIGIN_CORRELATION"
@@ -814,6 +882,12 @@ def render_correlation(correlation: Dict[str, Any]) -> str:
     access = correlation.get("origin_access", {})
     aggregation = correlation.get("origin_aggregation", {})
     aggregate = aggregation.get("aggregate") if isinstance(aggregation.get("aggregate"), dict) else {}
+    event_evidence = correlation.get("cloudflare_event_evidence", {})
+    event_window = (
+        event_evidence.get("event_window")
+        if isinstance(event_evidence.get("event_window"), dict)
+        else {}
+    )
     lines = private_header("Sentinel NowPlaying Cloudflare-Origin Correlation")
     lines += [
         f"- status: `{correlation.get('status')}`",
@@ -839,6 +913,20 @@ def render_correlation(correlation: Dict[str, Any]) -> str:
         f"- nginx timeout observed: `{aggregate.get('nginx_timeout_observed')}`",
         f"- upstream timeout observed: `{aggregate.get('upstream_timeout_observed')}`",
         f"- event-level correlation available: `{aggregate.get('event_level_correlation_available')}`",
+        f"- Cloudflare event evidence: `{event_evidence.get('status')}`",
+        f"- Cloudflare event window: `{event_window.get('window_start')}..{event_window.get('window_end')}`",
+        f"- Cloudflare event count: `{event_window.get('event_count')}`",
+        f"- weighted Cloudflare count: `{event_window.get('weighted_aggregate_count')}`",
+        f"- adaptive sample interval: `{event_window.get('average_sample_interval')}`",
+        f"- events with timestamps: `{event_window.get('events_with_timestamp')}`",
+        f"- events with Ray ID: `{event_window.get('events_with_ray_id')}`",
+        f"- event classifications: `{json.dumps(event_window.get('classification_totals', {}), sort_keys=True)}`",
+        f"- request-source counts: `{json.dumps(event_window.get('request_source_counts', {}), sort_keys=True)}`",
+        f"- origin-status counts: `{json.dumps(event_window.get('origin_status_counts', {}), sort_keys=True)}`",
+        f"- complete event coverage: `{event_window.get('complete_event_coverage')}`",
+        f"- event correlation possible: `{event_window.get('event_correlation_possible')}`",
+        f"- Logpull status: `{event_window.get('logpull_status')}`",
+        f"- origin event rows available: `{event_window.get('origin_event_rows_available')}`",
         f"- verified user impact: `{correlation.get('verified_user_impact')}`",
         f"- reason: {boundary.get('reason')}",
         "",
@@ -993,6 +1081,20 @@ def validate() -> Dict[str, Any]:
             findings.append("origin_aggregate_overclaimed_failure_layer")
         if boundary.get("causality_proven") is not False:
             findings.append("origin_aggregate_overclaimed_causality")
+    cloudflare_events = correlation.get("cloudflare_event_evidence", {})
+    event_window = cloudflare_events.get("event_window") if isinstance(
+        cloudflare_events.get("event_window"), dict
+    ) else {}
+    if cloudflare_events.get("incident_window_compatible") is True:
+        if event_window.get("causality_proven") is not False:
+            findings.append("cloudflare_events_overclaimed_causality")
+        if set(event_window.get("classification_totals", {})) - {"INSUFFICIENT_EVIDENCE"}:
+            findings.append("uncorrelated_cloudflare_events_overclassified")
+        if (
+            cloudflare_events.get("status") == "INCIDENT_WINDOW_CLOUDFLARE_EVENT_EVIDENCE"
+            and cloudflare_events.get("current_truth_compatible") is not False
+        ):
+            findings.append("incident_cloudflare_events_overwrote_current_truth")
     if report.get("breach") is True:
         findings.append("breach_true")
     return {
@@ -1045,6 +1147,27 @@ def self_test() -> Dict[str, Any]:
     aggregate_boundary = classify_failure_boundary(
         {"current_504": 834}, healthy_probe, aggregate_selection
     )
+    cloudflare_event_selection = {
+        "status": "INCIDENT_WINDOW_CLOUDFLARE_EVENT_EVIDENCE",
+        "current_truth_compatible": False,
+        "incident_window_compatible": True,
+        "event_window": {
+            "event_count": 832,
+            "events_with_timestamp": 832,
+            "events_with_ray_id": 0,
+            "origin_status_counts": {"0": 832},
+            "request_source_counts": {"earlyHintsCache": 832},
+            "classification_totals": {"INSUFFICIENT_EVIDENCE": 832},
+            "event_correlation_possible": False,
+            "causality_proven": False,
+        },
+    }
+    event_boundary = classify_failure_boundary(
+        {"current_504": 834},
+        healthy_probe,
+        aggregate_selection,
+        cloudflare_event_selection,
+    )
     owner = select_monitoring_decision(
         aligned,
         {
@@ -1063,6 +1186,19 @@ def self_test() -> Dict[str, Any]:
             "origin_access": {"status": "REMOTE_OWNER_ACTION_REQUIRED"},
             "origin_aggregation": aggregate_selection,
             "failure_boundary": aggregate_boundary,
+            "new_504_lower_bound_15m": 0,
+            "new_504_lower_bound_60m": 0,
+        },
+        safe,
+    )
+    event_owner = select_monitoring_decision(
+        aligned,
+        {
+            "cloudflare_504": 834,
+            "origin_access": {"status": "SSH_PROFILE_PRESENT"},
+            "origin_aggregation": aggregate_selection,
+            "cloudflare_event_evidence": cloudflare_event_selection,
+            "failure_boundary": event_boundary,
             "new_504_lower_bound_15m": 0,
             "new_504_lower_bound_60m": 0,
         },
@@ -1123,6 +1259,19 @@ def self_test() -> Dict[str, Any]:
             and aggregate_owner["next_read_only_diagnostic"]
             == "OBTAIN_EVENT_LEVEL_CLOUDFLARE_ORIGIN_CORRELATION"
         ),
+        "cloudflare_event_evidence_remains_fail_closed": (
+            event_boundary["failure_layer"] == "INSUFFICIENT_EVIDENCE"
+            and event_boundary["failure_boundary"] == "CF_ORIGIN_PATH_INTERMITTENCY"
+            and event_boundary["confidence"] == "STRONG"
+            and event_boundary["causality_proven"] is False
+            and event_boundary["exact_failure_layer_proven"] is False
+        ),
+        "cloudflare_timestamps_select_origin_log_gap": (
+            event_owner["decision"] == "OWNER_ACTION_REQUIRED"
+            and event_owner["execution"] == "NO_ACTION"
+            and event_owner["next_read_only_diagnostic"]
+            == "CORRELATE_CLOUDFLARE_TIMESTAMPS_WITH_ORIGIN_LOGS_READ_ONLY"
+        ),
         "remote_origin_owner_gated": owner["decision"] == "OWNER_ACTION_REQUIRED",
         "zero_current_504_no_action": no_action["decision"] == "NO_ACTION",
         "unknown_current_504_not_healthy": (
@@ -1132,7 +1281,9 @@ def self_test() -> Dict[str, Any]:
         ),
         "all_decisions_non_productive": all(
             row["execution"] == "NO_ACTION"
-            for row in (owner, aggregate_owner, no_action, unresolved, mismatch)
+            for row in (
+                owner, aggregate_owner, event_owner, no_action, unresolved, mismatch
+            )
         ),
         "no_new_waf_rule": owner["new_waf_rule_recommended"] is False,
         "low_live_unchanged": EXECUTION_BOUNDARIES["low_live_activation"] is False,

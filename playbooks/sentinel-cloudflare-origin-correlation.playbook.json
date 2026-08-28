@@ -7,8 +7,20 @@
       "confidence": "STRONG",
       "causality_proven": false
     },
-    "remaining_gap": "Cloudflare per-request timestamps or Ray IDs paired with origin handling",
+    "remaining_gap": "Cloudflare request timestamps paired with bounded exact-path nginx rows; Ray IDs are unavailable in the enabled httpRequestsAdaptive field set",
     "historical_evidence_cannot_overwrite_current_truth": true
+  },
+  "event_evidence_rule": {
+    "dataset": "httpRequestsAdaptive",
+    "event_count_source": "validated incident-window evidence",
+    "event_rows_are_incident_window_only": true,
+    "adaptive_sampling_must_be_reported": true,
+    "ray_ids_available": false,
+    "origin_event_rows_available": false,
+    "classification": "INSUFFICIENT_EVIDENCE",
+    "failure_boundary": "CF_ORIGIN_PATH_INTERMITTENCY",
+    "confidence_scope": "FAILURE_BOUNDARY",
+    "causality_proven": false
   },
   "decisions": [
     "NO_ACTION",

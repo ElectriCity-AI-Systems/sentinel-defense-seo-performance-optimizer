@@ -10,6 +10,7 @@
   ],
   "recognized_evidence": [
     "complete_exact_endpoint_origin_window_aggregate",
+    "bounded_cloudflare_http_event_window",
     "php_fatal",
     "wordpress_application_error",
     "origin_upstream_timeout",
@@ -36,6 +37,30 @@
     ],
     "current_truth_rule": "Current counters are compatible only when Cloudflare count and snapshot/window align.",
     "historical_rule": "Incident-window evidence remains visible but cannot overwrite current truth.",
+    "causality_proven": false
+  },
+  "cloudflare_event_contract": {
+    "evidence_kind": "NOWPLAYING_CLOUDFLARE_HTTP_EVENT_WINDOW",
+    "dataset": "httpRequestsAdaptive",
+    "minimum_fields": [
+      "UTC timestamp",
+      "edge response status",
+      "origin response status",
+      "origin timing fields",
+      "cache status",
+      "request source",
+      "adaptive sample interval and weighted count"
+    ],
+    "excluded_fields": [
+      "client IP",
+      "user agent",
+      "request query",
+      "response body",
+      "credentials"
+    ],
+    "current_truth_rule": "Incident events cannot replace a current counter unless count and snapshot or window align.",
+    "uncorrelated_classification": "INSUFFICIENT_EVIDENCE",
+    "coverage_rule": "Adaptive event rows are incomplete when weighted count differs from returned row count or sample interval is not 1.",
     "causality_proven": false
   },
   "remote_access": false,

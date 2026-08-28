@@ -38,6 +38,11 @@ ORIGIN_AGGREGATE_KIND = "NOWPLAYING_ORIGIN_WINDOW_AGGREGATE"
 ORIGIN_AGGREGATE_VERIFICATION_SOURCE = (
     "OWNER_VERIFIED_COMPLETE_NGINX_EXACT_ENDPOINT_AGGREGATION"
 )
+CLOUDFLARE_EVENT_SCHEMA_VERSION = "sentinel-cloudflare-http-event-window-1"
+CLOUDFLARE_EVENT_KIND = "NOWPLAYING_CLOUDFLARE_HTTP_EVENT_WINDOW"
+CLOUDFLARE_EVENT_VERIFICATION_SOURCE = (
+    "CLOUDFLARE_GRAPHQL_HTTP_REQUESTS_ADAPTIVE_READ_ONLY"
+)
 FILE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(?:json|jsonl|log)$")
 SNAPSHOT_ID_RE = re.compile(r"^\d{8}-\d{6}$")
 TIMESTAMP_RE = re.compile(r"(?P<timestamp>\d{4}-\d{2}-\d{2}[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-][0-2]\d:[0-5]\d)?)")
@@ -52,6 +57,8 @@ MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_RECORDS_PER_FILE = 5000
 MAX_TOTAL_RECORDS = 20000
 MAX_AGGREGATES = 100
+MAX_CLOUDFLARE_EVENT_WINDOWS = 20
+MAX_CLOUDFLARE_EVENTS_PER_WINDOW = 10000
 AGGREGATE_CURRENT_SECONDS = 24 * 60 * 60
 
 SOURCE_TYPES = {
@@ -252,6 +259,201 @@ def normalized_status_counts(value: Any) -> Optional[Dict[str, int]]:
     return dict(sorted(result.items()))
 
 
+def nonnegative_number(value: Any) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if result >= 0 else None
+
+
+def normalized_cloudflare_event_window(
+    row: Dict[str, Any], source_id: str
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Normalize bounded Cloudflare request events without claiming origin causality."""
+    findings: List[str] = []
+    if row.get("schema_version") != CLOUDFLARE_EVENT_SCHEMA_VERSION:
+        findings.append("invalid_schema_version")
+    if row.get("evidence_kind") != CLOUDFLARE_EVENT_KIND:
+        findings.append("invalid_evidence_kind")
+    if row.get("verification_source") != CLOUDFLARE_EVENT_VERIFICATION_SOURCE:
+        findings.append("unverified_source")
+
+    retrieved_at = parse_timestamp(row.get("retrieved_at"))
+    window_start = parse_timestamp(row.get("window_start"))
+    window_end = parse_timestamp(row.get("window_end"))
+    if retrieved_at is None:
+        findings.append("invalid_retrieved_at")
+    if window_start is None or window_end is None or window_start >= window_end:
+        findings.append("invalid_evidence_window")
+
+    endpoint = row.get("endpoint")
+    hostname = row.get("hostname")
+    snapshot_id = row.get("cloudflare_snapshot_id")
+    if not isinstance(endpoint, str) or not endpoint.startswith("/") or "?" in endpoint:
+        findings.append("invalid_endpoint")
+    if not isinstance(hostname, str) or not hostname or "/" in hostname or "@" in hostname:
+        findings.append("invalid_hostname")
+    if not isinstance(snapshot_id, str) or not SNAPSHOT_ID_RE.fullmatch(snapshot_id):
+        findings.append("invalid_cloudflare_snapshot_id")
+
+    aggregate_count = nonnegative_int(row.get("cloudflare_aggregate_504_count"))
+    declared_count = nonnegative_int(row.get("graphql_event_count"))
+    weighted_count = nonnegative_int(row.get("graphql_weighted_aggregate_count"))
+    sample_interval = nonnegative_number(row.get("graphql_average_sample_interval"))
+    raw_events = row.get("events")
+    if aggregate_count is None:
+        findings.append("invalid_cloudflare_aggregate_504_count")
+    if declared_count is None:
+        findings.append("invalid_graphql_event_count")
+    if weighted_count is None or weighted_count != aggregate_count:
+        findings.append("invalid_graphql_weighted_aggregate_count")
+    if sample_interval is None or sample_interval <= 0:
+        findings.append("invalid_graphql_average_sample_interval")
+    if not isinstance(raw_events, list) or len(raw_events) > MAX_CLOUDFLARE_EVENTS_PER_WINDOW:
+        findings.append("invalid_events")
+        raw_events = []
+    if declared_count is not None and declared_count != len(raw_events):
+        findings.append("event_count_mismatch")
+
+    if row.get("graphql_dataset") != "httpRequestsAdaptive":
+        findings.append("invalid_graphql_dataset")
+    if row.get("graphql_dataset_enabled") is not True:
+        findings.append("graphql_dataset_not_enabled")
+    if not isinstance(row.get("origin_event_rows_available"), bool):
+        findings.append("invalid_origin_event_rows_available")
+    if row.get("credential_search_performed") is not False:
+        findings.append("credential_search_not_false")
+
+    normalized_events: List[Dict[str, Any]] = []
+    for index, event in enumerate(raw_events):
+        if not isinstance(event, dict):
+            findings.append("invalid_event_row")
+            continue
+        timestamp = parse_timestamp(event.get("timestamp"))
+        edge_status = nonnegative_int(event.get("edge_response_status"))
+        origin_status = nonnegative_int(event.get("origin_response_status"))
+        timings = {
+            name: nonnegative_number(event.get(name))
+            for name in (
+                "origin_response_duration_ms",
+                "origin_response_header_receive_duration_ms",
+                "origin_tcp_handshake_duration_ms",
+                "origin_tls_handshake_duration_ms",
+            )
+        }
+        cache_status = event.get("cache_status")
+        request_source = event.get("request_source")
+        if (
+            timestamp is None
+            or window_start is None
+            or window_end is None
+            or not window_start <= timestamp <= window_end
+        ):
+            findings.append("event_timestamp_outside_window")
+        if edge_status != 504:
+            findings.append("event_edge_status_not_504")
+        if origin_status is None or origin_status > 599:
+            findings.append("invalid_origin_response_status")
+        if any(value is None for value in timings.values()):
+            findings.append("invalid_origin_timing")
+        if not isinstance(cache_status, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", cache_status):
+            findings.append("invalid_cache_status")
+        if not isinstance(request_source, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", request_source):
+            findings.append("invalid_request_source")
+        if findings:
+            continue
+        normalized_timestamp = iso_utc(timestamp)
+        identity = {
+            "source_id": source_id,
+            "index": index,
+            "timestamp": normalized_timestamp,
+            "edge_response_status": edge_status,
+            "origin_response_status": origin_status,
+            **timings,
+        }
+        normalized_events.append({
+            "event_id": "cf-event-" + canonical_hash(identity)[:24],
+            "timestamp": normalized_timestamp,
+            "ray_id": None,
+            "edge_response_status": edge_status,
+            "origin_response_status": origin_status,
+            **timings,
+            "cache_status": cache_status,
+            "request_source": request_source,
+            "classification": "INSUFFICIENT_EVIDENCE",
+            "causality_proven": False,
+        })
+
+    if findings:
+        return None, ",".join(sorted(set(findings)))
+
+    event_count = len(normalized_events)
+    event_timestamps = [event["timestamp"] for event in normalized_events]
+    origin_status_counts: Dict[str, int] = {}
+    request_source_counts: Dict[str, int] = {}
+    cache_status_counts: Dict[str, int] = {}
+    for event in normalized_events:
+        status_key = str(event["origin_response_status"])
+        origin_status_counts[status_key] = origin_status_counts.get(status_key, 0) + 1
+        source_key = event["request_source"]
+        request_source_counts[source_key] = request_source_counts.get(source_key, 0) + 1
+        cache_key = event["cache_status"]
+        cache_status_counts[cache_key] = cache_status_counts.get(cache_key, 0) + 1
+
+    return {
+        "event_window_id": "cf-window-" + canonical_hash({
+            "source_id": source_id,
+            "window_start": iso_utc(window_start),
+            "window_end": iso_utc(window_end),
+            "endpoint": endpoint,
+            "event_count": event_count,
+        })[:24],
+        "schema_version": CLOUDFLARE_EVENT_SCHEMA_VERSION,
+        "evidence_kind": CLOUDFLARE_EVENT_KIND,
+        "verification_source": CLOUDFLARE_EVENT_VERIFICATION_SOURCE,
+        "source_id": source_id,
+        "retrieved_at": iso_utc(retrieved_at),
+        "window_start": iso_utc(window_start),
+        "window_end": iso_utc(window_end),
+        "cloudflare_snapshot_id": snapshot_id,
+        "cloudflare_aggregate_504_count": aggregate_count,
+        "endpoint": endpoint,
+        "hostname": hostname,
+        "graphql_dataset": "httpRequestsAdaptive",
+        "graphql_dataset_enabled": True,
+        "event_count": event_count,
+        "weighted_aggregate_count": weighted_count,
+        "average_sample_interval": sample_interval,
+        "adaptive_sampling_present": sample_interval != 1.0,
+        "events_with_timestamp": len(event_timestamps),
+        "events_with_ray_id": 0,
+        "first_event_at": min(event_timestamps) if event_timestamps else None,
+        "last_event_at": max(event_timestamps) if event_timestamps else None,
+        "edge_status_counts": {"504": event_count},
+        "origin_status_counts": dict(sorted(origin_status_counts.items())),
+        "request_source_counts": dict(sorted(request_source_counts.items())),
+        "cache_status_counts": dict(sorted(cache_status_counts.items())),
+        "classification_totals": {"INSUFFICIENT_EVIDENCE": event_count},
+        "complete_event_coverage": event_count == aggregate_count and sample_interval == 1.0,
+        "event_correlation_possible": False,
+        "origin_event_rows_available": row["origin_event_rows_available"],
+        "origin_access_status": str(row.get("origin_access_status") or "UNKNOWN"),
+        "logpull_status": str(row.get("logpull_status") or "UNKNOWN"),
+        "logpull_http_status": nonnegative_int(row.get("logpull_http_status")),
+        "logpull_error_code": nonnegative_int(row.get("logpull_error_code")),
+        "unavailable_event_fields": [
+            str(value) for value in row.get("unavailable_event_fields", [])
+            if isinstance(value, str)
+        ],
+        "credential_search_performed": False,
+        "raw_response_stored": False,
+        "client_identifiers_stored": False,
+        "causality_proven": False,
+        "verified_user_impact": "unknown",
+        "events": normalized_events,
+    }, "ok"
+
+
 def normalized_origin_aggregate(
     row: Dict[str, Any], source_id: str
 ) -> Tuple[Optional[Dict[str, Any]], str]:
@@ -390,6 +592,22 @@ def aggregate_freshness(aggregates: List[Dict[str, Any]], now: datetime) -> Dict
     }
 
 
+def cloudflare_event_window_freshness(
+    windows: List[Dict[str, Any]], now: datetime
+) -> Dict[str, Any]:
+    retrieved = [parse_timestamp(row.get("retrieved_at")) for row in windows]
+    valid = [item for item in retrieved if item is not None and item <= now]
+    if not valid:
+        return {"status": "MISSING_OR_INVALID_TIMESTAMP", "latest_retrieved_at": None, "age_seconds": None}
+    latest = max(valid)
+    age = max(0.0, (now - latest).total_seconds())
+    return {
+        "status": "CURRENT" if age <= AGGREGATE_CURRENT_SECONDS else "STALE_EXCLUDED_FROM_RUNTIME_PROOF",
+        "latest_retrieved_at": iso_utc(latest),
+        "age_seconds": round(age, 2),
+    }
+
+
 def select_origin_aggregate(
     report: Dict[str, Any],
     endpoint: Any,
@@ -454,6 +672,77 @@ def select_origin_aggregate(
             "The aggregate matches the current Cloudflare count and evidence window."
             if current_compatible
             else "The aggregate is retained as verified incident-window evidence and is excluded from current counters."
+        ),
+    }
+
+
+def select_cloudflare_event_window(
+    report: Dict[str, Any],
+    endpoint: Any,
+    hostname: Any,
+    current_cloudflare_504: Any,
+    current_snapshot_id: Any,
+    current_window_start: Any = None,
+    current_window_end: Any = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Keep historical request events visible without replacing current counters."""
+    current_count = nonnegative_int(current_cloudflare_504)
+    evaluated_at = (now or utc_now_dt()).astimezone(timezone.utc)
+    current_start = parse_timestamp(current_window_start)
+    current_end = parse_timestamp(current_window_end)
+    candidates: List[Dict[str, Any]] = []
+    for row in report.get("cloudflare_event_windows", []):
+        if not isinstance(row, dict) or row.get("evidence_kind") != CLOUDFLARE_EVENT_KIND:
+            continue
+        if row.get("endpoint") != endpoint or row.get("hostname") != hostname:
+            continue
+        retrieved_at = parse_timestamp(row.get("retrieved_at"))
+        if (
+            retrieved_at is None
+            or retrieved_at > evaluated_at
+            or (evaluated_at - retrieved_at).total_seconds() > AGGREGATE_CURRENT_SECONDS
+        ):
+            continue
+        candidates.append(row)
+
+    if not candidates:
+        return {
+            "status": "CLOUDFLARE_EVENT_EVIDENCE_MISSING",
+            "current_truth_compatible": False,
+            "incident_window_compatible": False,
+            "event_window": None,
+            "reason": "No fresh bounded Cloudflare event window matches the fixed endpoint and hostname.",
+        }
+
+    row = max(candidates, key=lambda item: item.get("retrieved_at", ""))
+    event_start = parse_timestamp(row.get("window_start"))
+    event_end = parse_timestamp(row.get("window_end"))
+    exact_snapshot = row.get("cloudflare_snapshot_id") == current_snapshot_id
+    within_current_window = bool(
+        current_start and current_end and event_start and event_end
+        and current_start <= event_start <= event_end <= current_end
+    )
+    count_match = current_count is not None and row.get("cloudflare_aggregate_504_count") == current_count
+    current_compatible = count_match and (exact_snapshot or within_current_window)
+    return {
+        "status": (
+            "CURRENT_CLOUDFLARE_EVENT_EVIDENCE"
+            if current_compatible
+            else "INCIDENT_WINDOW_CLOUDFLARE_EVENT_EVIDENCE"
+        ),
+        "current_truth_compatible": current_compatible,
+        "incident_window_compatible": True,
+        "compatibility": {
+            "cloudflare_504_count_match": count_match,
+            "cloudflare_snapshot_exact": exact_snapshot,
+            "event_window_within_current_monitor_window": within_current_window,
+        },
+        "event_window": row,
+        "reason": (
+            "The Cloudflare request events match the current count and evidence window."
+            if current_compatible
+            else "The Cloudflare request events are retained as incident-window evidence and cannot replace current counters."
         ),
     }
 
@@ -543,7 +832,9 @@ def parse_structured_rows(value: Any, source_id: str) -> Tuple[List[Dict[str, An
     return events, skipped
 
 
-def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
+def parse_file(
+    path: Path,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     source_id = "source-" + file_hash(path)[:20]
     metadata: Dict[str, Any] = {
         "source_id": source_id,
@@ -557,12 +848,13 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], 
     }
     events: List[Dict[str, Any]] = []
     aggregates: List[Dict[str, Any]] = []
+    cloudflare_event_windows: List[Dict[str, Any]] = []
     if path.suffix == ".json":
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             metadata["status"] = "INVALID_JSON"
-            return [], [], metadata
+            return [], [], [], metadata
         if isinstance(value, dict) and value.get("evidence_kind") == ORIGIN_AGGREGATE_KIND:
             aggregate, aggregate_status = normalized_origin_aggregate(value, source_id)
             if aggregate is not None:
@@ -571,6 +863,14 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], 
             else:
                 skipped = {"invalid_row": 1, "secret_pattern": 0}
                 metadata["aggregate_validation"] = aggregate_status
+        elif isinstance(value, dict) and value.get("evidence_kind") == CLOUDFLARE_EVENT_KIND:
+            event_window, event_window_status = normalized_cloudflare_event_window(value, source_id)
+            if event_window is not None:
+                cloudflare_event_windows.append(event_window)
+                skipped = {"invalid_row": 0, "secret_pattern": 0}
+            else:
+                skipped = {"invalid_row": 1, "secret_pattern": 0}
+                metadata["cloudflare_event_validation"] = event_window_status
         else:
             events, skipped = parse_structured_rows(value, source_id)
         metadata["records_read"] = len(value) if isinstance(value, list) else 1
@@ -580,7 +880,7 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], 
             lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[:MAX_RECORDS_PER_FILE]
         except OSError:
             metadata["status"] = "READ_ERROR"
-            return [], [], metadata
+            return [], [], [], metadata
         metadata["records_read"] = len(lines)
         if path.suffix == ".jsonl":
             values: List[Any] = []
@@ -602,10 +902,11 @@ def parse_file(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], 
                     skipped["secret_pattern"] += 1
     metadata["records_emitted"] = len(events)
     metadata["aggregates_emitted"] = len(aggregates)
+    metadata["cloudflare_event_windows_emitted"] = len(cloudflare_event_windows)
     metadata["secret_rows_skipped"] = skipped["secret_pattern"]
     metadata["invalid_rows_skipped"] = skipped["invalid_row"]
     metadata["status"] = "COLLECTED"
-    return events, aggregates, metadata
+    return events, aggregates, cloudflare_event_windows, metadata
 
 
 def freshness(events: List[Dict[str, Any]], now: datetime) -> Dict[str, Any]:
@@ -634,15 +935,24 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
     )
     events: List[Dict[str, Any]] = []
     aggregates: List[Dict[str, Any]] = []
+    cloudflare_event_windows: List[Dict[str, Any]] = []
     sources: List[Dict[str, Any]] = []
     for path in files:
-        file_events, file_aggregates, metadata = parse_file(path)
+        file_events, file_aggregates, file_cloudflare_windows, metadata = parse_file(path)
         remaining = max(0, MAX_TOTAL_RECORDS - len(events))
         events.extend(file_events[:remaining])
         aggregate_remaining = max(0, MAX_AGGREGATES - len(aggregates))
         aggregates.extend(file_aggregates[:aggregate_remaining])
+        event_window_remaining = max(
+            0, MAX_CLOUDFLARE_EVENT_WINDOWS - len(cloudflare_event_windows)
+        )
+        cloudflare_event_windows.extend(file_cloudflare_windows[:event_window_remaining])
         sources.append(metadata)
-        if len(events) >= MAX_TOTAL_RECORDS and len(aggregates) >= MAX_AGGREGATES:
+        if (
+            len(events) >= MAX_TOTAL_RECORDS
+            and len(aggregates) >= MAX_AGGREGATES
+            and len(cloudflare_event_windows) >= MAX_CLOUDFLARE_EVENT_WINDOWS
+        ):
             break
     categories: Dict[str, int] = {}
     for event in events:
@@ -652,6 +962,9 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
     generated_at_dt = parse_timestamp(generated_at) or utc_now_dt()
     event_freshness = freshness(events, generated_at_dt)
     origin_aggregate_freshness = aggregate_freshness(aggregates, generated_at_dt)
+    cloudflare_events_freshness = cloudflare_event_window_freshness(
+        cloudflare_event_windows, generated_at_dt
+    )
     evidence_freshness = (
         origin_aggregate_freshness
         if origin_aggregate_freshness["status"] == "CURRENT"
@@ -681,6 +994,12 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
             1 for row in aggregates if row.get("complete_exact_endpoint_aggregation") is True
         ),
         "origin_aggregates": aggregates,
+        "cloudflare_event_window_freshness": cloudflare_events_freshness,
+        "cloudflare_event_window_count": len(cloudflare_event_windows),
+        "cloudflare_event_count": sum(
+            row.get("event_count", 0) for row in cloudflare_event_windows
+        ),
+        "cloudflare_event_windows": cloudflare_event_windows,
         "category_counts": categories,
         "sources": sources,
         "events": events,
@@ -708,7 +1027,8 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
             history = []
     history.append({key: report[key] for key in (
         "generated_at", "status", "normalized_event_count", "direct_evidence_count",
-        "origin_aggregate_count", "complete_origin_aggregate_count", "freshness", "category_counts"
+        "origin_aggregate_count", "complete_origin_aggregate_count", "freshness",
+        "category_counts", "cloudflare_event_window_count", "cloudflare_event_count",
     )})
     write_json(HISTORY_JSON, history[-200:])
     lines = [
@@ -720,6 +1040,8 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
         f"- Normalized events: `{report['normalized_event_count']}`",
         f"- Direct evidence: `{report['direct_evidence_count']}`",
         f"- Complete origin aggregates: `{report['complete_origin_aggregate_count']}`",
+        f"- Cloudflare event windows: `{report['cloudflare_event_window_count']}`",
+        f"- Cloudflare request events: `{report['cloudflare_event_count']}`",
         f"- Freshness: `{report['freshness']['status']}`",
         f"- Raw log lines stored: `false`",
         f"- Causality proven: `false`",
@@ -737,6 +1059,8 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
             "normalized_event_count": len(events),
             "direct_evidence_count": direct,
             "complete_origin_aggregate_count": report["complete_origin_aggregate_count"],
+            "cloudflare_event_window_count": report["cloudflare_event_window_count"],
+            "cloudflare_event_count": report["cloudflare_event_count"],
             "raw_log_lines_stored": False,
             "breach": False,
         })
@@ -813,6 +1137,70 @@ def self_test() -> Dict[str, Any]:
         "2026-08-27T19:19:07Z",
         datetime(2026, 8, 27, 19, 10, tzinfo=timezone.utc),
     )
+    cloudflare_event_fixture = {
+        "schema_version": CLOUDFLARE_EVENT_SCHEMA_VERSION,
+        "evidence_kind": CLOUDFLARE_EVENT_KIND,
+        "verification_source": CLOUDFLARE_EVENT_VERIFICATION_SOURCE,
+        "retrieved_at": "2026-08-27T19:30:00Z",
+        "window_start": "2026-08-26T16:15:59Z",
+        "window_end": "2026-08-27T06:42:40Z",
+        "cloudflare_snapshot_id": "20260827-140232",
+        "cloudflare_aggregate_504_count": 3,
+        "endpoint": "/api/nowplaying/electri-city-ai-electro-radio",
+        "hostname": "radio.example.test",
+        "graphql_dataset": "httpRequestsAdaptive",
+        "graphql_dataset_enabled": True,
+        "graphql_event_count": 2,
+        "graphql_weighted_aggregate_count": 3,
+        "graphql_average_sample_interval": 1.5,
+        "origin_event_rows_available": False,
+        "origin_access_status": "READ_ONLY_FORCED_COMMAND_UNSUPPORTED",
+        "credential_search_performed": False,
+        "logpull_status": "PLAN_UNAVAILABLE_FREE_ZONE",
+        "logpull_http_status": 403,
+        "logpull_error_code": 10000,
+        "unavailable_event_fields": ["RayID", "coloCode", "originIP"],
+        "events": [
+            {
+                "timestamp": "2026-08-26T16:22:42Z",
+                "edge_response_status": 504,
+                "origin_response_status": 0,
+                "origin_response_duration_ms": 0,
+                "origin_response_header_receive_duration_ms": 0,
+                "origin_tcp_handshake_duration_ms": 0,
+                "origin_tls_handshake_duration_ms": 0,
+                "cache_status": "miss",
+                "request_source": "earlyHintsCache",
+            },
+            {
+                "timestamp": "2026-08-27T06:28:51Z",
+                "edge_response_status": 504,
+                "origin_response_status": 0,
+                "origin_response_duration_ms": 0,
+                "origin_response_header_receive_duration_ms": 0,
+                "origin_tcp_handshake_duration_ms": 0,
+                "origin_tls_handshake_duration_ms": 0,
+                "cache_status": "miss",
+                "request_source": "earlyHintsCache",
+            },
+        ],
+    }
+    cloudflare_window, cloudflare_window_status = normalized_cloudflare_event_window(
+        cloudflare_event_fixture, "source-test"
+    )
+    cloudflare_event_report = {
+        "cloudflare_event_windows": [cloudflare_window] if cloudflare_window else []
+    }
+    cloudflare_incident_match = select_cloudflare_event_window(
+        cloudflare_event_report,
+        cloudflare_event_fixture["endpoint"],
+        cloudflare_event_fixture["hostname"],
+        139,
+        "20260828-040740",
+        "2026-08-27T04:07:40Z",
+        "2026-08-28T04:07:40Z",
+        datetime(2026, 8, 27, 20, 0, tzinfo=timezone.utc),
+    )
     source = Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports: List[str] = []
@@ -859,6 +1247,29 @@ def self_test() -> Dict[str, Any]:
             historical_match["status"] == "INCIDENT_WINDOW_ORIGIN_CORRELATION_EVIDENCE"
             and historical_match["current_truth_compatible"] is False
             and historical_match["aggregate"]["cloudflare_504_count"] == 834
+        ),
+        "cloudflare_event_window_normalized_fail_closed": (
+            cloudflare_window_status == "ok"
+            and bool(cloudflare_window)
+            and cloudflare_window["event_count"] == 2
+            and cloudflare_window["events_with_timestamp"] == 2
+            and cloudflare_window["events_with_ray_id"] == 0
+            and cloudflare_window["classification_totals"] == {"INSUFFICIENT_EVIDENCE": 2}
+            and cloudflare_window["event_correlation_possible"] is False
+            and cloudflare_window["causality_proven"] is False
+        ),
+        "cloudflare_adaptive_coverage_gap_preserved": (
+            bool(cloudflare_window)
+            and cloudflare_window["cloudflare_aggregate_504_count"] == 3
+            and cloudflare_window["weighted_aggregate_count"] == 3
+            and cloudflare_window["adaptive_sampling_present"] is True
+            and cloudflare_window["complete_event_coverage"] is False
+        ),
+        "historical_cloudflare_events_cannot_overwrite_current_truth": (
+            cloudflare_incident_match["status"]
+            == "INCIDENT_WINDOW_CLOUDFLARE_EVENT_EVIDENCE"
+            and cloudflare_incident_match["current_truth_compatible"] is False
+            and cloudflare_incident_match["event_window"]["event_count"] == 2
         ),
         "no_network_imports": not network_imports,
         "no_command_execution": not command_calls,
