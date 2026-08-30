@@ -421,6 +421,8 @@ def normalized_cloudflare_event_window(
         "hostname": hostname,
         "graphql_dataset": "httpRequestsAdaptive",
         "graphql_dataset_enabled": True,
+        "cloudflare_data_type": "HTTP_REQUESTS_ADAPTIVE_SAMPLED_ROWS",
+        "complete_raw_request_log": False,
         "event_count": event_count,
         "weighted_aggregate_count": weighted_count,
         "average_sample_interval": sample_interval,
@@ -1041,7 +1043,7 @@ def collect(write_audit: bool = True) -> Dict[str, Any]:
         f"- Direct evidence: `{report['direct_evidence_count']}`",
         f"- Complete origin aggregates: `{report['complete_origin_aggregate_count']}`",
         f"- Cloudflare event windows: `{report['cloudflare_event_window_count']}`",
-        f"- Cloudflare request events: `{report['cloudflare_event_count']}`",
+        f"- Cloudflare adaptive rows: `{report['cloudflare_event_count']}`",
         f"- Freshness: `{report['freshness']['status']}`",
         f"- Raw log lines stored: `false`",
         f"- Causality proven: `false`",
@@ -1254,6 +1256,9 @@ def self_test() -> Dict[str, Any]:
             and cloudflare_window["event_count"] == 2
             and cloudflare_window["events_with_timestamp"] == 2
             and cloudflare_window["events_with_ray_id"] == 0
+            and cloudflare_window["cloudflare_data_type"]
+            == "HTTP_REQUESTS_ADAPTIVE_SAMPLED_ROWS"
+            and cloudflare_window["complete_raw_request_log"] is False
             and cloudflare_window["classification_totals"] == {"INSUFFICIENT_EVIDENCE": 2}
             and cloudflare_window["event_correlation_possible"] is False
             and cloudflare_window["causality_proven"] is False

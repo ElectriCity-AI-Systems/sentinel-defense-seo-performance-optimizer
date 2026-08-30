@@ -42,6 +42,8 @@
   "cloudflare_event_contract": {
     "evidence_kind": "NOWPLAYING_CLOUDFLARE_HTTP_EVENT_WINDOW",
     "dataset": "httpRequestsAdaptive",
+    "data_type": "HTTP_REQUESTS_ADAPTIVE_SAMPLED_ROWS",
+    "complete_raw_request_log": false,
     "minimum_fields": [
       "UTC timestamp",
       "edge response status",
@@ -60,7 +62,7 @@
     ],
     "current_truth_rule": "Incident events cannot replace a current counter unless count and snapshot or window align.",
     "uncorrelated_classification": "INSUFFICIENT_EVIDENCE",
-    "coverage_rule": "Adaptive event rows are incomplete when weighted count differs from returned row count or sample interval is not 1.",
+    "coverage_rule": "Adaptive sampled rows are not complete raw requests; physical row count and weighted count remain separate.",
     "causality_proven": false
   },
   "remote_access": false,

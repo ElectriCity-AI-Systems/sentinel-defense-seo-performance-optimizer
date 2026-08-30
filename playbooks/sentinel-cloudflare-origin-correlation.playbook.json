@@ -12,6 +12,7 @@
   },
   "event_evidence_rule": {
     "dataset": "httpRequestsAdaptive",
+    "data_type": "HTTP_REQUESTS_ADAPTIVE_SAMPLED_ROWS",
     "event_count_source": "validated incident-window evidence",
     "event_rows_are_incident_window_only": true,
     "adaptive_sampling_must_be_reported": true,

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import sentinel_guarded_autonomy as guarded
+import sentinel_runtime_safety as runtime_safety
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -145,6 +146,7 @@ def append_audit(result: Dict[str, Any]) -> None:
         "permission_status": result["capability"]["permission_status"],
         "write_canary_status": result["write_canary"]["current_status"],
         "write_canary_freshness": result["write_canary"]["freshness"],
+        "source_integrity_status": result["source_integrity"]["status"],
         "low_live_readiness": result["low_live_readiness"]["status"],
         "real_mutation_performed": False,
         "low_live": False,
@@ -509,6 +511,7 @@ def readiness_gate(
     canary: Dict[str, Any],
     capability: Dict[str, Any],
     rollback_status: str,
+    source_integrity_status: str,
 ) -> Dict[str, Any]:
     if not isinstance(canonical_report, dict):
         return {
@@ -529,6 +532,7 @@ def readiness_gate(
         "write_canary_successful": canary.get("current_status") == CANARY_OK,
         "write_capability_verified": capability.get("status") in CAPABILITY_VERIFIED_STATUSES,
         "rollback_verified": rollback_status == "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
+        "source_integrity_verified": source_integrity_status == "SOURCE_INTEGRITY_VERIFIED",
         "low_live_still_disabled": canonical_value(canonical_report, "low_live_enabled") is False,
         "medium_disabled": canonical_value(canonical_report, "medium_live_enabled") is False,
         "high_disabled": canonical_value(canonical_report, "high_live_enabled") is False,
@@ -573,7 +577,14 @@ def evaluate(
 
     capability = apply_fresh_canary_permission_evidence(historical, capability)
     rollback = guarded.deterministic_rollback_test()
-    gate = readiness_gate(canonical_report, historical, capability, rollback.get("status", "UNKNOWN"))
+    source_integrity = runtime_safety.verify_fixed_source_manifest()
+    gate = readiness_gate(
+        canonical_report,
+        historical,
+        capability,
+        rollback.get("status", "UNKNOWN"),
+        source_integrity.get("status", "UNKNOWN"),
+    )
     promotion = PROMOTION_READY if gate["status"] == READY else PROMOTION_BLOCKED
     blockers = sorted(set([
         *gate.get("blockers", []),
@@ -590,6 +601,7 @@ def evaluate(
         "low_live_readiness": {**gate, "blockers": blockers},
         "promotion_gate_status": promotion,
         "rollback": rollback,
+        "source_integrity": source_integrity,
         "safety": {
             "real_mutation_performed": False,
             "low_live": False,
@@ -628,6 +640,7 @@ def render_markdown(result: Dict[str, Any]) -> str:
         f"- current canary status: `{canary['current_status']}`",
         f"- capability check: `{capability.get('status')}`",
         f"- permission status: `{capability.get('permission_status')}`",
+        f"- source integrity: `{result['source_integrity'].get('status', 'UNKNOWN')}`",
         f"- fixed zone active: `{str(capability.get('fixed_zone_active')).lower()}`",
         f"- custom rule usage: `{capability.get('custom_rule_count')}/{capability.get('custom_rule_limit')}`",
         f"- dedicated fixed canary present: `{str(capability.get('dedicated_fixed_canary_present')).lower()}`",
@@ -713,10 +726,17 @@ def self_test() -> Dict[str, Any]:
     ready = readiness_gate(
         _fixture_canonical(), current_ok, capability_ok,
         "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
+        "SOURCE_INTEGRITY_VERIFIED",
     )
     unknown_safety = readiness_gate(
         _fixture_canonical(emergency_stop=None), current_ok, capability_ok,
         "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
+        "SOURCE_INTEGRITY_VERIFIED",
+    )
+    blocked_integrity = readiness_gate(
+        _fixture_canonical(), current_ok, capability_ok,
+        "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
+        "SOURCE_INTEGRITY_BLOCKED",
     )
     source = Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -743,6 +763,10 @@ def self_test() -> Dict[str, Any]:
         ),
         "incomplete_canary_fails_closed": incomplete_capability["status"] == CAPABILITY_PERMISSION_UNPROVEN,
         "unknown_safety_fails_closed": unknown_safety["status"] == NOT_READY,
+        "source_integrity_failure_blocks_readiness": (
+            blocked_integrity["status"] == NOT_READY
+            and "source_integrity_verified" in blocked_integrity["blockers"]
+        ),
         "stale_readiness_envelope_fails_closed": runtime_readiness_gate(
             {"generated_at": "2026-08-29T00:00:00Z", "low_live_readiness": {"status": READY}}, now
         )["freshness"] == STALE,
