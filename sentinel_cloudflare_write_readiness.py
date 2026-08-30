@@ -65,10 +65,12 @@ PERMISSION_UNPROVEN = "ZONE_WAF_WRITE_PERMISSION_UNPROVEN"
 CAPABILITY_VERIFIED_STATUSES = frozenset({CAPABILITY_VERIFIED, CAPABILITY_VERIFIED_BY_CANARY})
 
 READY = "READY_FOR_OWNER_ACTIVATION"
+ACTIVE = "LOW_LIVE_ACTIVE"
 NOT_READY = "NOT_READY_FOR_OWNER_ACTIVATION"
 NOT_EVALUATED = "LOW_LIVE_READINESS_PENDING_CANONICAL_EVALUATION"
 
 PROMOTION_READY = "RUNTIME_PROMOTION_READY_FOR_OWNER_ACTIVATION"
+PROMOTION_ACTIVE = "RUNTIME_PROMOTION_LOW_LIVE_ACTIVE"
 PROMOTION_BLOCKED = "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS"
 
 # Cloudflare currently counts all rules in the zone's custom firewall phase
@@ -485,7 +487,7 @@ def runtime_readiness_gate(value: Dict[str, Any], now: Optional[datetime] = None
     readiness = value.get("low_live_readiness") if isinstance(value.get("low_live_readiness"), dict) else {}
     status = readiness.get("status")
     blockers = readiness.get("blockers") if isinstance(readiness.get("blockers"), list) else []
-    if status != READY:
+    if status not in {READY, ACTIVE}:
         return {
             "status": NOT_READY,
             "freshness": CURRENT,
@@ -494,6 +496,7 @@ def runtime_readiness_gate(value: Dict[str, Any], now: Optional[datetime] = None
         }
     return {
         "status": READY,
+        "activation_status": status,
         "freshness": CURRENT,
         "age_seconds": round(age_seconds, 2),
         "blockers": [],
@@ -519,6 +522,8 @@ def readiness_gate(
             "blockers": ["canonical_truth_not_evaluated"],
             "checks": {},
         }
+    low_live_enabled = canonical_value(canonical_report, "low_live_enabled")
+    production_apply_lock = canonical_value(canonical_report, "production_apply_lock")
     checks = {
         "canonical_truth_ok": canonical_report.get("status") == "CANONICAL_TRUTH_OK",
         "website_status_ok": canonical_value(canonical_report, "website_status") == "OK",
@@ -533,13 +538,19 @@ def readiness_gate(
         "write_capability_verified": capability.get("status") in CAPABILITY_VERIFIED_STATUSES,
         "rollback_verified": rollback_status == "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
         "source_integrity_verified": source_integrity_status == "SOURCE_INTEGRITY_VERIFIED",
-        "low_live_still_disabled": canonical_value(canonical_report, "low_live_enabled") is False,
         "medium_disabled": canonical_value(canonical_report, "medium_live_enabled") is False,
         "high_disabled": canonical_value(canonical_report, "high_live_enabled") is False,
-        "production_apply_locked": canonical_value(canonical_report, "production_apply_lock") is True,
+        "low_runtime_state_consistent": (
+            (low_live_enabled is False and production_apply_lock is True)
+            or (low_live_enabled is True and production_apply_lock is False)
+        ),
     }
     blockers = [name for name, passed in checks.items() if not passed]
-    status = READY if not blockers else NOT_READY
+    status = (
+        ACTIVE
+        if not blockers and low_live_enabled is True
+        else (READY if not blockers else NOT_READY)
+    )
     return {"status": status, "blockers": blockers, "checks": checks}
 
 
@@ -585,7 +596,11 @@ def evaluate(
         rollback.get("status", "UNKNOWN"),
         source_integrity.get("status", "UNKNOWN"),
     )
-    promotion = PROMOTION_READY if gate["status"] == READY else PROMOTION_BLOCKED
+    promotion = (
+        PROMOTION_ACTIVE
+        if gate["status"] == ACTIVE
+        else (PROMOTION_READY if gate["status"] == READY else PROMOTION_BLOCKED)
+    )
     blockers = sorted(set([
         *gate.get("blockers", []),
         *(["cloudflare_custom_rule_capacity_exhausted"] if capability.get("status") == CAPABILITY_CAPACITY_BLOCKED else []),
@@ -604,10 +619,10 @@ def evaluate(
         "source_integrity": source_integrity,
         "safety": {
             "real_mutation_performed": False,
-            "low_live": False,
+            "low_live": canonical_value(canonical_report or {}, "low_live_enabled"),
             "medium": False,
             "high": False,
-            "production_apply_lock": True,
+            "production_apply_lock": canonical_value(canonical_report or {}, "production_apply_lock"),
             "emergency_stop": canonical_value(canonical_report or {}, "emergency_stop"),
             "breach": False,
         },
@@ -627,6 +642,7 @@ def render_markdown(result: Dict[str, Any]) -> str:
     canary = result["write_canary"]
     capability = result["capability"]
     readiness = result["low_live_readiness"]
+    safety = result["safety"]
     blockers = readiness.get("blockers", [])
     return "\n".join([
         "# Sentinel Cloudflare Write Readiness",
@@ -652,10 +668,10 @@ def render_markdown(result: Dict[str, Any]) -> str:
         "",
         "- Cloudflare methods used: `GET`",
         "- real mutation performed: `false`",
-        "- LOW_LIVE: `false`",
-        "- MEDIUM: `false`",
-        "- HIGH: `false`",
-        "- production apply lock: `true`",
+        f"- LOW_LIVE: `{str(safety.get('low_live')).lower()}`",
+        f"- MEDIUM: `{str(safety.get('medium')).lower()}`",
+        f"- HIGH: `{str(safety.get('high')).lower()}`",
+        f"- production apply lock: `{str(safety.get('production_apply_lock')).lower()}`",
     ])
 
 
@@ -728,6 +744,13 @@ def self_test() -> Dict[str, Any]:
         "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
         "SOURCE_INTEGRITY_VERIFIED",
     )
+    active = readiness_gate(
+        _fixture_canonical(low_live_enabled=True, production_apply_lock=False),
+        current_ok,
+        capability_ok,
+        "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
+        "SOURCE_INTEGRITY_VERIFIED",
+    )
     unknown_safety = readiness_gate(
         _fixture_canonical(emergency_stop=None), current_ok, capability_ok,
         "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
@@ -757,6 +780,10 @@ def self_test() -> Dict[str, Any]:
         "stale_canary_not_current_truth": stale["freshness"] == STALE and stale["current_status"] == CANARY_STALE,
         "stale_blocked_not_green": stale["current_status"] != CANARY_OK,
         "all_green_yields_owner_readiness_only": ready["status"] == READY,
+        "active_low_runtime_is_consistent": active["status"] == ACTIVE,
+        "active_low_runtime_gate_remains_green": runtime_readiness_gate(
+            {"generated_at": "2026-08-30T00:00:00Z", "low_live_readiness": active}, now
+        )["status"] == READY,
         "fresh_complete_canary_proves_permission": (
             capability_ok["status"] == CAPABILITY_VERIFIED_BY_CANARY
             and capability_ok["permission_status"] == PERMISSION_VERIFIED_BY_CANARY
@@ -791,16 +818,17 @@ def print_status(result: Dict[str, Any]) -> None:
     canary = result.get("write_canary", {})
     capability = result.get("capability", {})
     readiness = result.get("low_live_readiness", {})
+    safety = result.get("safety", {})
     print(result.get("status", "NOT_RUN"))
     print(f"write_canary={canary.get('current_status', 'UNKNOWN')}")
     print(f"write_canary_freshness={canary.get('freshness', 'UNKNOWN')}")
     print(f"capability={capability.get('status', 'UNKNOWN')}")
     print(f"permission={capability.get('permission_status', 'UNKNOWN')}")
     print(f"low_live_readiness={readiness.get('status', 'UNKNOWN')}")
-    print("low_live=false")
-    print("medium=false")
-    print("high=false")
-    print("production_apply_lock=true")
+    print(f"low_live={str(safety.get('low_live')).lower()}")
+    print(f"medium={str(safety.get('medium')).lower()}")
+    print(f"high={str(safety.get('high')).lower()}")
+    print(f"production_apply_lock={str(safety.get('production_apply_lock')).lower()}")
 
 
 def build_parser() -> argparse.ArgumentParser:

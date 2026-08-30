@@ -13,14 +13,15 @@
     "rollback",
     "audit"
   ],
-  "allowed_actions": [],
-  "review_only_contracts": [
+  "allowed_actions": [
     "temporary_scanner_managed_challenge_v1",
     "rollback_sentinel_owned_rule_v1"
   ],
-  "autonomous_waf_enabled": false,
-  "runtime_low_live_enabled": false,
+  "review_only_contracts": [],
+  "autonomous_waf_enabled": true,
+  "autonomous_waf_scope": "temporary_scanner_managed_challenge_v1_only",
+  "runtime_low_live_enabled": true,
   "default_decision": "BLOCK_UNREGISTERED",
   "name": "sentinel-low-live-actions",
-  "risk": "LOW_LIVE_FAIL_CLOSED"
+  "risk": "LOW_LIVE_EXACT_ALLOWLIST_FAIL_CLOSED"
 }

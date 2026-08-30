@@ -860,7 +860,11 @@ def scheduler_verification_logic(
 ) -> Dict[str, Any]:
     cycle_rows = [row for row in rows if row.get("cycle_id")]
     cycle_ids = [str(row["cycle_id"]) for row in cycle_rows]
-    allowed_decisions = {"NO_ACTION", "ACTION_CANDIDATE_BLOCKED_BY_VERIFICATION_STAGE"}
+    allowed_decisions = {
+        "NO_ACTION",
+        "MONITOR_CONTINUE",
+        "ACTION_CANDIDATE_BLOCKED_BY_VERIFICATION_STAGE",
+    }
     successful = [row for row in cycle_rows if row.get("decision") in allowed_decisions]
     last_three = cycle_rows[-3:]
     cycle_healthchecks_ok = len(last_three) == 3 and all(
@@ -1127,6 +1131,20 @@ def activate_guarded_canary() -> Dict[str, Any]:
         save_activation_state(state)
         write_reports(state)
         return state
+    low_scope = guarded.low_activation_contract()
+    if low_scope.get("status") != "LOW_SCOPE_VALID":
+        state = load_activation_state()
+        state.update(
+            {
+                "status": "GUARDED_ACTIVATION_BLOCKED",
+                "activation_stage": STAGE_SCHEDULER,
+                "blockers": ["low_scope_validation"],
+                "low_scope": low_scope,
+            }
+        )
+        save_activation_state(state)
+        write_reports(state)
+        return state
     guarded.transition(runtime, guarded.CANARY)
     runtime["flags"].update(guarded.active_flags())
     runtime["activation_stage"] = STAGE_CANARY
@@ -1142,10 +1160,7 @@ def activate_guarded_canary() -> Dict[str, Any]:
         "elapsed_minutes": 0.0,
         "maximum_active_actions": 1,
         "maximum_action_ttl_minutes": 10,
-        "enabled_action_ids": [
-            "temporary_scanner_managed_challenge_v1",
-            "rollback_sentinel_owned_rule_v1",
-        ],
+        "enabled_action_ids": list(guarded.LOW_LIVE_ACTION_IDS),
         "baseline_tls_snapshot_id": latest_tls.get("latest_snapshot_id"),
         "baseline_526": latest_tls.get("current_526"),
         "decision": "NO_ACTION",
@@ -1293,10 +1308,7 @@ def activate_level_2() -> Dict[str, Any]:
         "low_live_enabled": True,
         "medium_enabled": False,
         "high_enabled": False,
-        "enabled_action_ids": [
-            "temporary_scanner_managed_challenge_v1",
-            "rollback_sentinel_owned_rule_v1",
-        ],
+        "enabled_action_ids": list(guarded.LOW_LIVE_ACTION_IDS),
         "rollback_ready": True,
         "circuit_breaker_armed": guarded.circuit_status(guarded.load_circuit())["status"] == "CIRCUIT_BREAKER_ARMED",
         "emergency_stop": False,
@@ -1534,6 +1546,17 @@ def self_test(write_outputs: bool = False) -> Dict[str, Any]:
     tls_a = evaluate_tls_logic(2, 2, 3, 65.0, True, True, False, False)
     tls_b = evaluate_tls_logic(2, 3, 3, 65.0, True, True, False, False)
     scheduler = scheduler_verification_logic(synthetic_rows, True, True, True, True)
+    monitor_continue_rows = [
+        {
+            "cycle_id": f"monitor-cycle-{index}",
+            "decision": "MONITOR_CONTINUE",
+            "validation_result": {"status": "HEALTH_TARGET_GATE_GREEN"},
+        }
+        for index in range(3)
+    ]
+    monitor_continue_scheduler = scheduler_verification_logic(
+        monitor_continue_rows, True, True, True, True
+    )
     canary = evaluate_canary_logic(60.0, True, True, 0, 0, ["NO_ACTION"])
     rollback = guarded.deterministic_rollback_test()
     credential_values_not_persisted = credential_leak_scan()
@@ -1554,6 +1577,9 @@ def self_test(write_outputs: bool = False) -> Dict[str, Any]:
         "test_c_unsafe_credential_mode": credential_mode_safe(0o644) is False,
         "test_d_missing_health_target": validate_missing_health_target(),
         "test_e_scheduler_verification": scheduler["status"] == "SCHEDULER_VERIFICATION_GREEN",
+        "test_e_monitor_continue_scheduler_verification": (
+            monitor_continue_scheduler["status"] == "SCHEDULER_VERIFICATION_GREEN"
+        ),
         "test_f_no_trigger_canary": canary["status"] == "GUARDED_CANARY_WINDOW_GREEN",
         "test_g_policy_drift_degrades": guarded_policy_drift_contract(),
         "test_h_rollback": rollback["status"] == "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
@@ -1573,6 +1599,7 @@ def self_test(write_outputs: bool = False) -> Dict[str, Any]:
         "no_second_state_machine": "ALLOWED_TRANSITIONS" not in globals(),
         "medium_high_disabled": guarded.POLICY_TEMPLATE["medium_live_enabled"] is False
         and guarded.POLICY_TEMPLATE["high_live_enabled"] is False,
+        "low_scope_contract": guarded.low_activation_contract()["status"] == "LOW_SCOPE_VALID",
         "breach_false": guarded.default_flags()["breach"] is False,
     }
     findings = [name for name, passed in checks.items() if not passed]

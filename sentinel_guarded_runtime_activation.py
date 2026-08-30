@@ -622,7 +622,11 @@ def guarded_rows_since(started_at: Optional[str]) -> Tuple[List[Dict[str, Any]],
 
 
 def scheduler_verification_logic(rows: Sequence[Dict[str, Any]], timer_active: bool, invalid_rows: int) -> Dict[str, Any]:
-    allowed = {"NO_ACTION", "ACTION_CANDIDATE_BLOCKED_BY_VERIFICATION_STAGE"}
+    allowed = {
+        "NO_ACTION",
+        "MONITOR_CONTINUE",
+        "ACTION_CANDIDATE_BLOCKED_BY_VERIFICATION_STAGE",
+    }
     last_three = list(rows)[-3:]
     cycle_ids = [str(row.get("cycle_id")) for row in last_three]
     checks = {
@@ -723,6 +727,7 @@ def activate_guarded_canary() -> Dict[str, Any]:
     )
     runtime = guarded.load_state()
     circuit = guarded.circuit_status(guarded.load_circuit())
+    low_scope = guarded.low_activation_contract()
     blockers = []
     if scheduler.get("status") != "SCHEDULER_VERIFICATION_GREEN":
         blockers.append("scheduler_verification")
@@ -734,6 +739,8 @@ def activate_guarded_canary() -> Dict[str, Any]:
         blockers.append("rollback_test")
     if circuit.get("status") != "CIRCUIT_BREAKER_ARMED":
         blockers.append("circuit_breaker")
+    if low_scope.get("status") != "LOW_SCOPE_VALID":
+        blockers.append("low_scope_validation")
     if runtime.get("machine_state") != guarded.PREFLIGHT or runtime.get("activation_stage") not in {STAGE_SCHEDULER, STAGE_MONITORING}:
         blockers.append("scheduler_runtime_stage")
     if blockers:
@@ -754,8 +761,7 @@ def activate_guarded_canary() -> Dict[str, Any]:
             "status": "GUARDED_CANARY",
             "systemd_installed": True,
             "enabled_action_ids": [
-                "temporary_scanner_managed_challenge_v1",
-                "rollback_sentinel_owned_rule_v1",
+                *guarded.LOW_LIVE_ACTION_IDS,
             ],
         }
         guarded.write_state(runtime, record_history=True)
@@ -1089,6 +1095,18 @@ def self_test() -> Dict[str, Any]:
         True,
         0,
     )
+    monitor_continue_scheduler = scheduler_verification_logic(
+        [
+            {
+                "cycle_id": f"monitor-cycle-{index}",
+                "decision": "MONITOR_CONTINUE",
+                "validation_result": {"status": "HEALTH_TARGET_GATE_GREEN_CHALLENGE_AWARE"},
+            }
+            for index in range(3)
+        ],
+        True,
+        0,
+    )
     promotion = promotion_logic(61.0, 20, 0, 0, 0, False, False, 0, 0)
     stale_write_promotion = enforce_write_readiness_promotion_gate(
         promotion,
@@ -1101,9 +1119,12 @@ def self_test() -> Dict[str, Any]:
     current_write_gate = write_readiness.runtime_readiness_gate(
         guarded.load_dict(WRITE_READINESS_STATE)
     )
-    promotion_live = evaluate_promotion()
-    expected_live_promotion = (
-        "RUNTIME_PROMOTION_READY_FOR_CANARY"
+    promotion_gate_result = enforce_write_readiness_promotion_gate(
+        promotion,
+        current_write_gate,
+    )
+    expected_promotion_status = (
+        "RUNTIME_PROMOTION_GREEN"
         if current_write_gate.get("status") == write_readiness.READY
         else "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS"
     )
@@ -1151,14 +1172,15 @@ def self_test() -> Dict[str, Any]:
             and stale_write_promotion["blockers"] == ["write_readiness_stale"]
         ),
         "test_k_promotion_matches_current_write_readiness": (
-            promotion_live["status"] == expected_live_promotion
-            and promotion_live.get("low_live_apply_enabled") is False
-            and promotion_live.get("production_apply_lock") is True
+            promotion_gate_result["status"] == expected_promotion_status
         ),
-        "test_l_scheduler_cycles_preserved": promotion_live.get("scheduler_successful_cycles", 0) >= 3,
-        "test_m_no_canary_cycles_on_blocked": promotion_live.get("guarded_canary_successful_cycles", 0) == 0,
-        "test_n_monitoring_not_fallback": promotion_live.get("runtime_stage") in {STAGE_MONITORING, STAGE_SCHEDULER},
+        "test_l_scheduler_cycles_preserved": scheduler.get("successful_cycles") == 3,
+        "test_m_exact_two_low_actions": guarded.low_activation_contract().get("allowed_action_count") == 2,
+        "test_n_medium_high_stay_disabled": guarded.active_flags()["medium_live_apply_enabled"] is False
+        and guarded.active_flags()["high_live_apply_enabled"] is False,
         "scheduler_three_cycles": scheduler["status"] == "SCHEDULER_VERIFICATION_GREEN",
+        "scheduler_monitor_continue_is_safe": monitor_continue_scheduler["status"] == "SCHEDULER_VERIFICATION_GREEN",
+        "low_scope_contract": guarded.low_activation_contract()["status"] == "LOW_SCOPE_VALID",
         "canary_one_action_per_hour": canary_rate_limit == (False, "hourly_action_limit"),
         "no_shell_true": shell_true is False,
         "fixed_subprocess_gateways": subprocess_sites == 2,

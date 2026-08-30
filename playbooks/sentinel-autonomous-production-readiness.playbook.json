@@ -1,7 +1,7 @@
 {
   "schema_version": "sentinel-playbook-1",
   "playbook_id": "sentinel-autonomous-production-readiness",
-  "mode": "AUTONOMOUS_MONITORING_WITH_FAIL_CLOSED_REMEDIATION",
+  "mode": "AUTONOMOUS_MONITORING_WITH_GUARDED_LOW_LIVE",
   "required_capabilities": [
     "monitoring",
     "evidence_refresh",
@@ -24,8 +24,12 @@
     "breach_false"
   ],
   "low_live_rule": "fresh evidence plus proven cause plus exact scope plus independently verified rollback, otherwise no action",
-  "autonomous_external_mutation": false,
-  "autonomous_waf": false,
+  "autonomous_external_mutation": "EXACT_LOW_LIVE_ALLOWLIST_ONLY",
+  "autonomous_waf": "TEMPORARY_SCANNER_MANAGED_CHALLENGE_ONLY",
+  "enabled_action_ids": [
+    "temporary_scanner_managed_challenge_v1",
+    "rollback_sentinel_owned_rule_v1"
+  ],
   "source_self_modification": false,
   "llm_required": false,
   "breach": false

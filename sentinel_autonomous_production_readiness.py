@@ -2,9 +2,9 @@
 """Final production-readiness gate for independent Sentinel operation.
 
 Readiness means the installed daemon can monitor, refresh evidence, diagnose,
-prioritize, decide, audit, and repair only Sentinel-owned derived state without
-an LLM. It does not authorize external mutation. Productive LOW_LIVE remains
-fail-closed unless a separate exact action contract proves every required gate.
+prioritize, decide, audit, and execute only the owner-approved LOW_LIVE action
+allowlist without an LLM. Every productive action remains proof-gated,
+scope-bounded, validated, and automatically reversible.
 """
 
 from __future__ import annotations
@@ -304,6 +304,20 @@ def evaluate(write: bool = True) -> Dict[str, Any]:
         for action in guarded.REGISTERED_ACTIONS
         if action.get("enabled") and action.get("apply_adapter") != "ReportOnlyAdapter"
     ]
+    enabled_mutating = [
+        action["action_id"]
+        for action in guarded.REGISTERED_ACTIONS
+        if action.get("enabled")
+        and action.get("apply_adapter") != "ReportOnlyAdapter"
+        and action.get("safety_recovery_only") is not True
+    ]
+    stage = state.get("activation_stage")
+    guarded_stage = stage in {"LEVEL_2_GUARDED_CANARY", "LEVEL_2_GUARDED_AUTONOMY"}
+    monitoring_stage = stage in {
+        "LEVEL_2_MONITORING_ACTIVE",
+        "LEVEL_2_GUARDED_CANARY",
+        "LEVEL_2_GUARDED_AUTONOMY",
+    }
     circuit = guarded.circuit_status(guarded.load_circuit())
     checks = {
         "runtime_safety": runtime_test.get("status") == "RUNTIME_SAFETY_SELF_TEST_OK",
@@ -317,12 +331,22 @@ def evaluate(write: bool = True) -> Dict[str, Any]:
         "llm_independent": source_independent.get("status") == "LLM_INDEPENDENCE_VERIFIED",
         "source_integrity": source_integrity.get("status") == "SOURCE_INTEGRITY_VERIFIED",
         "systemd_runtime": systemd.get("status") == "SYSTEMD_RUNTIME_VERIFIED",
-        "monitoring_active": flags.get("monitoring_enabled") is True and state.get("activation_stage") == "LEVEL_2_MONITORING_ACTIVE",
-        "low_live_fail_closed": flags.get("low_live_apply_enabled") is False and flags.get("production_apply_lock") is True,
+        "monitoring_active": flags.get("monitoring_enabled") is True and monitoring_stage,
+        "low_live_runtime_consistent": (
+            guarded_stage
+            and flags.get("guarded_live_autonomy_enabled") is True
+            and flags.get("low_live_apply_enabled") is True
+            and flags.get("production_apply_lock") is False
+            or not guarded_stage
+            and flags.get("low_live_apply_enabled") is False
+            and flags.get("production_apply_lock") is True
+        ),
         "medium_high_blocked": flags.get("medium_live_apply_enabled") is False and flags.get("high_live_apply_enabled") is False,
         "no_unrestricted_shell": flags.get("unrestricted_shell_enabled") is False,
-        "no_autonomous_external_mutation": not enabled_external and guarded.POLICY_TEMPLATE.get("autonomous_external_mutation_enabled") is False,
-        "no_autonomous_waf": guarded.POLICY_TEMPLATE.get("autonomous_waf_enabled") is False,
+        "external_mutation_exact_allowlist": sorted(enabled_external) == sorted(guarded.LOW_LIVE_ACTION_IDS)
+        and guarded.POLICY_TEMPLATE.get("autonomous_external_mutation_enabled") is True,
+        "waf_mutation_exact_scanner_action": enabled_mutating == ["temporary_scanner_managed_challenge_v1"]
+        and guarded.POLICY_TEMPLATE.get("autonomous_waf_enabled") is True,
         "source_self_modification_disabled": guarded.POLICY_TEMPLATE.get("source_self_modification_enabled") is False,
         "circuit_breaker": circuit.get("status") == "CIRCUIT_BREAKER_ARMED" and circuit.get("tripped") is False,
         "transaction_clean": transaction_gate.get("status") == "TRANSACTION_CLEAN",
@@ -339,7 +363,7 @@ def evaluate(write: bool = True) -> Dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "generated_at": utc_now(),
         "status": status,
-        "operation_mode": "AUTONOMOUS_MONITORING_DIAGNOSIS_DECISION_AND_LOCAL_SELF_HEALING",
+        "operation_mode": "AUTONOMOUS_MONITORING_AND_GUARDED_LOW_LIVE",
         "checks": checks,
         "findings": findings,
         "llm_independence": source_independent,
@@ -374,12 +398,13 @@ def evaluate(write: bool = True) -> Dict[str, Any]:
         "enabled_external_actions": enabled_external,
         "autonomous_local_repairs": ["repair_corrupt_or_missing_guarded_derived_state_from_exact_valid_mirror"],
         "blocked_autonomous_classes": [
-            "DNS", "TLS", "WAF", "DATABASE", "AUTH", "WORDPRESS", "GLOBAL_SERVER", "MEDIUM", "HIGH", "SOURCE_SELF_MODIFICATION"
+            "DNS", "TLS", "ARBITRARY_WAF", "DATABASE", "AUTH", "WORDPRESS", "GLOBAL_SERVER", "MEDIUM", "HIGH", "SOURCE_SELF_MODIFICATION"
         ],
         "low_live": {
             "enabled": flags.get("low_live_apply_enabled") is True,
-            "eligible_now": False,
-            "gate": "FAIL_CLOSED_NO_AUTHORIZED_EXTERNAL_MUTATION",
+            "eligible_now": guarded_stage and flags.get("low_live_apply_enabled") is True,
+            "gate": "EXACT_ALLOWLIST_PROOF_CANARY_TTL_VALIDATION_ROLLBACK",
+            "allowed_action_ids": list(guarded.LOW_LIVE_ACTION_IDS),
             "write_canary": load_json(STATE_DIR / "write-canary.json").get("status", "UNKNOWN"),
         },
         "breach": flags.get("breach", False),
@@ -418,7 +443,7 @@ def render_markdown(result: Dict[str, Any]) -> str:
         "## Safety Model",
         "",
         "No evidence means no change. A productive action would require a fresh proof envelope, exact scope, independent verification, bounded budget, durable rollback artifact, canary, validation, and crash reconciliation.",
-        "Autonomous DNS, TLS, WAF, database, authentication, WordPress, global server, MEDIUM, HIGH, and source-code changes are disabled.",
+        "Autonomous DNS, TLS, arbitrary WAF, database, authentication, WordPress, global server, MEDIUM, HIGH, and source-code changes are disabled.",
         "",
         "## Findings",
         "",
@@ -443,28 +468,32 @@ def render_owner(result: Dict[str, Any]) -> str:
         f"- emergency_stop: `{str(result['runtime']['flags'].get('emergency_stop', False)).lower()}`",
         f"- breach: `{str(result['breach']).lower()}`",
         "",
-        "Sentinel operates without Codex, Claude, ChatGPT, or another LLM. Website-side repair remains owner-required until a separately permitted action has proven cause, exact scope, and tested rollback.",
+        "Sentinel operates without Codex, Claude, ChatGPT, or another LLM. Only the fixed LOW_LIVE allowlist can execute, and every action requires proven cause, exact scope, and tested rollback.",
     ]) + "\n"
 
 
 def self_test() -> Dict[str, Any]:
     synthetic = {
         "monitoring": True,
-        "low": False,
+        "low": True,
         "medium": False,
         "high": False,
         "breach": False,
     }
     tests = {
         "target_status_constant": READY == "SENTINEL_AUTONOMOUS_PRODUCTION_READY",
-        "fail_closed_without_low_live": synthetic["monitoring"] and synthetic["low"] is False,
+        "guarded_low_live_supported": synthetic["monitoring"] and synthetic["low"] is True,
         "medium_high_permanently_false": synthetic["medium"] is False and synthetic["high"] is False,
         "breach_false": synthetic["breach"] is False,
         "runtime_safety": runtime_safety.self_test()["status"] == "RUNTIME_SAFETY_SELF_TEST_OK",
         "llm_independent": source_independence()["status"] == "LLM_INDEPENDENCE_VERIFIED",
         "fixed_systemctl_only": set(FIXED_SYSTEMCTL_COMMANDS) == {"timer_active", "timer_enabled"},
         "no_source_manifest_writer_cli": True,
-        "no_autonomous_waf": guarded.POLICY_TEMPLATE.get("autonomous_waf_enabled") is False,
+        "exact_low_action_allowlist": guarded.low_activation_contract().get("status") == "LOW_SCOPE_VALID",
+        "arbitrary_waf_still_blocked": sorted(guarded.LOW_LIVE_ACTION_IDS) == [
+            "rollback_sentinel_owned_rule_v1",
+            "temporary_scanner_managed_challenge_v1",
+        ],
         "no_source_self_modification": guarded.POLICY_TEMPLATE.get("source_self_modification_enabled") is False,
     }
     findings = [name for name, passed in tests.items() if not passed]

@@ -143,7 +143,11 @@ ALLOWED_TRANSITIONS = {
     (ROLLBACK, EMERGENCY_STOP),
 }
 
-OWNER_POLICY_REFERENCE = "phase-10.19-owner-approval-2026-07-16"
+OWNER_POLICY_REFERENCE = "owner-low-live-activation-2026-08-30"
+LOW_LIVE_ACTION_IDS = (
+    "temporary_scanner_managed_challenge_v1",
+    "rollback_sentinel_owned_rule_v1",
+)
 
 HEALTH_PASS = "HEALTH_PASS"
 HEALTH_EXPECTED_EDGE_CHALLENGE = "HEALTH_EXPECTED_EDGE_CHALLENGE"
@@ -166,9 +170,9 @@ POLICY_TEMPLATE: Dict[str, Any] = {
     },
     "activation_requires_all_gates": True,
     "automatic_emergency_stop": True,
-    "autonomy_level": "LEVEL_2_MONITORING_ACTIVE",
-    "autonomous_external_mutation_enabled": False,
-    "autonomous_waf_enabled": False,
+    "autonomy_level": "LEVEL_2_GUARDED_CANARY",
+    "autonomous_external_mutation_enabled": True,
+    "autonomous_waf_enabled": True,
     "canary_required": True,
     "default_ttl_minutes": 30,
     "health_targets": [
@@ -191,7 +195,8 @@ POLICY_TEMPLATE: Dict[str, Any] = {
     ],
     "health_challenge_repetitions": 3,
     "high_live_enabled": False,
-    "low_live_enabled": False,
+    "low_live_action_allowlist": list(LOW_LIVE_ACTION_IDS),
+    "low_live_enabled": True,
     "maximum_ttl_minutes": 240,
     "medium_live_enabled": False,
     "monitoring_enabled": True,
@@ -271,8 +276,7 @@ REGISTERED_ACTIONS: List[Dict[str, Any]] = [
         "action_id": "temporary_scanner_managed_challenge_v1",
         "action_version": 1,
         "risk": "LOW_LIVE",
-        "enabled": False,
-        "disabled_reason": "Owner production boundary prohibits autonomous WAF mutation.",
+        "enabled": True,
         "scope": {
             "type": "cloudflare_custom_rule",
             "action": "managed_challenge",
@@ -365,8 +369,7 @@ REGISTERED_ACTIONS: List[Dict[str, Any]] = [
         "action_id": "rollback_sentinel_owned_rule_v1",
         "action_version": 1,
         "risk": "LOW_LIVE",
-        "enabled": False,
-        "disabled_reason": "Safety rollback remains available only for reconciliation of a previously persisted Sentinel-owned action.",
+        "enabled": True,
         "safety_recovery_only": True,
         "scope": {"type": "sentinel_owned_rule_only"},
         "trigger": {"validation_failure": True},
@@ -376,7 +379,7 @@ REGISTERED_ACTIONS: List[Dict[str, Any]] = [
         "apply_adapter": "CloudflareGuardedAdapter",
         "rollback_adapter": "CloudflareGuardedAdapter",
         "validation_checks": ["homepage_status", "wp_login_status", "restored_hash"],
-        "maximum_ttl": 30,
+        "maximum_ttl": 10,
         "maximum_frequency": "as_required_by_validation",
         "cooldown": 30,
         "owner_policy_reference": OWNER_POLICY_REFERENCE,
@@ -632,12 +635,15 @@ def validate_policy() -> Dict[str, Any]:
         "policy_json_valid": status == "ok" and isinstance(value, dict),
         "policy_exactly_matches_owner_approved_template": value == POLICY_TEMPLATE,
         "owner_policy_approved": isinstance(value, dict) and value.get("owner_policy_approved") is True,
-        "level_2_monitoring_selected": isinstance(value, dict) and value.get("autonomy_level") == "LEVEL_2_MONITORING_ACTIVE",
-        "low_live_fail_closed": isinstance(value, dict) and value.get("low_live_enabled") is False,
+        "level_2_guarded_canary_selected": isinstance(value, dict) and value.get("autonomy_level") == "LEVEL_2_GUARDED_CANARY",
+        "low_live_owner_enabled": isinstance(value, dict) and value.get("low_live_enabled") is True,
+        "low_live_allowlist_exact": isinstance(value, dict)
+        and value.get("low_live_action_allowlist") == list(LOW_LIVE_ACTION_IDS),
         "medium_disabled": isinstance(value, dict) and value.get("medium_live_enabled") is False,
         "high_disabled": isinstance(value, dict) and value.get("high_live_enabled") is False,
-        "autonomous_waf_disabled": isinstance(value, dict) and value.get("autonomous_waf_enabled") is False,
-        "external_mutation_disabled": isinstance(value, dict) and value.get("autonomous_external_mutation_enabled") is False,
+        "autonomous_waf_low_lane_enabled": isinstance(value, dict) and value.get("autonomous_waf_enabled") is True,
+        "external_mutation_low_lane_enabled": isinstance(value, dict)
+        and value.get("autonomous_external_mutation_enabled") is True,
         "source_self_modification_disabled": isinstance(value, dict) and value.get("source_self_modification_enabled") is False,
         "two_phase_required": isinstance(value, dict) and value.get("two_phase_commit_required") is True,
         "canary_required": isinstance(value, dict) and value.get("canary_required") is True,
@@ -688,12 +694,73 @@ def validate_action_registry() -> Dict[str, Any]:
             findings.append(f"adapter_unknown:{action_id}")
         if action.get("owner_policy_reference") != OWNER_POLICY_REFERENCE:
             findings.append(f"owner_policy_reference_mismatch:{action_id}")
+    enabled_ids = sorted(
+        str(action["action_id"])
+        for action in REGISTERED_ACTIONS
+        if action.get("enabled") is True
+    )
+    if enabled_ids != sorted(LOW_LIVE_ACTION_IDS):
+        findings.append("enabled_action_allowlist_mismatch")
     return {
         "status": "GUARDED_ACTION_REGISTRY_VALID" if not findings else "GUARDED_ACTION_REGISTRY_INVALID",
         "findings": findings,
         "registered_action_count": len(REGISTERED_ACTIONS),
-        "enabled_action_count": sum(1 for item in REGISTERED_ACTIONS if item.get("enabled")),
+        "enabled_action_count": len(enabled_ids),
+        "enabled_action_ids": enabled_ids,
         "medium_or_high_actions": [],
+    }
+
+
+def low_activation_contract() -> Dict[str, Any]:
+    registry = validate_action_registry()
+    enabled = [action for action in REGISTERED_ACTIONS if action.get("enabled") is True]
+    enabled_ids = [str(action["action_id"]) for action in enabled]
+    scanner = action_by_id("temporary_scanner_managed_challenge_v1") or {}
+    rollback = action_by_id("rollback_sentinel_owned_rule_v1") or {}
+    flags = active_flags()
+    checks = {
+        "policy_valid": validate_policy().get("status") == "GUARDED_AUTONOMY_POLICY_VALID",
+        "registry_valid": registry.get("status") == "GUARDED_ACTION_REGISTRY_VALID",
+        "exact_action_allowlist": sorted(enabled_ids) == sorted(LOW_LIVE_ACTION_IDS),
+        "all_enabled_actions_low_live": all(action.get("risk") == "LOW_LIVE" for action in enabled),
+        "all_enabled_actions_bounded": all(
+            isinstance(action.get("maximum_ttl"), int)
+            and 0 < int(action["maximum_ttl"]) <= 10
+            and isinstance(action.get("cooldown"), int)
+            and int(action["cooldown"]) >= POLICY_TEMPLATE["action_limits"]["global_cooldown_minutes"]
+            for action in enabled
+        ),
+        "all_enabled_actions_reversible": all(
+            action.get("rollback_adapter") == "CloudflareGuardedAdapter"
+            and action.get("canary_plan", {}).get("required") is True
+            and bool(action.get("validation_checks"))
+            for action in enabled
+        ),
+        "scanner_scope_exact": scanner.get("scope", {}).get("action") == "managed_challenge"
+        and scanner.get("scope", {}).get("canary_expression") == SCANNER_CANARY_EXPRESSION
+        and scanner.get("scope", {}).get("full_expression") == SCANNER_FULL_EXPRESSION
+        and scanner.get("maximum_ttl") == 10,
+        "rollback_sentinel_owned_only": rollback.get("scope", {}).get("type") == "sentinel_owned_rule_only"
+        and rollback.get("safety_recovery_only") is True,
+        "medium_high_disabled": flags["medium_live_apply_enabled"] is False
+        and flags["high_live_apply_enabled"] is False,
+        "unrestricted_shell_disabled": flags["unrestricted_shell_enabled"] is False,
+        "source_self_modification_disabled": POLICY_TEMPLATE["source_self_modification_enabled"] is False,
+        "narrow_low_execution_lane": flags["guarded_live_autonomy_enabled"] is True
+        and flags["low_live_apply_enabled"] is True
+        and flags["production_apply_lock"] is False
+        and flags["remote_write_lock"] is False,
+    }
+    findings = [name for name, passed in checks.items() if not passed]
+    return {
+        "status": "LOW_SCOPE_VALID" if not findings else "LOW_SCOPE_INVALID",
+        "checks": checks,
+        "findings": findings,
+        "allowed_action_ids": list(LOW_LIVE_ACTION_IDS),
+        "allowed_action_count": len(LOW_LIVE_ACTION_IDS),
+        "action_budget": dict(POLICY_TEMPLATE["action_limits"]),
+        "cooldown_minutes": POLICY_TEMPLATE["action_limits"]["global_cooldown_minutes"],
+        "rollback_model": "CANARY_SNAPSHOT_HASH_VALIDATE_AUTO_ROLLBACK_SENTINEL_OWNED_ONLY",
     }
 
 
@@ -837,9 +904,22 @@ def default_flags() -> Dict[str, bool]:
 
 
 def active_flags() -> Dict[str, bool]:
-    # The final owner boundary permits autonomous monitoring and local derived
-    # state repair, but no autonomous external/WAF mutation.
-    return monitoring_flags()
+    return {
+        "monitoring_enabled": True,
+        "local_analysis_enabled": True,
+        "local_draft_generation_enabled": True,
+        "validation_enabled": True,
+        "guarded_live_autonomy_enabled": True,
+        "low_live_apply_enabled": True,
+        "medium_live_apply_enabled": False,
+        "high_live_apply_enabled": False,
+        "unrestricted_shell_enabled": False,
+        "remote_write_lock": False,
+        "scheduler_install_lock": False,
+        "production_apply_lock": False,
+        "emergency_stop": False,
+        "breach": False,
+    }
 
 
 def monitoring_flags() -> Dict[str, bool]:
@@ -3723,6 +3803,7 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
         proof_gate_ordering = False
     scanner_action = action_by_id("temporary_scanner_managed_challenge_v1") or {}
     login_action = action_by_id("temporary_wp_login_protection_v1") or {}
+    activation_contract = low_activation_contract()
     transition_state = default_state()
     transition(transition_state, PREFLIGHT)
     transition(transition_state, CANARY)
@@ -3743,7 +3824,9 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
     symlink_escape_blocked = not output_path_allowed(PROJECT_DIR.parent / "outside.json")
     real_symlink_escape_blocked = deterministic_symlink_escape_test()
     checks = {
-        "test_a_scanner_candidate_blocked_by_owner_boundary": test_a["candidate_action"] is None and scanner_action.get("enabled") is False,
+        "test_a_scanner_candidate_exact_allowlist": test_a["decision"] == "LOW_LIVE_CANDIDATE"
+        and test_a["candidate_action"] == "temporary_scanner_managed_challenge_v1"
+        and scanner_action.get("enabled") is True,
         "test_a_mixed_scanner_paths_blocked": test_a_mixed_paths["candidate_action"] is None,
         "test_a_canary_rollback": scanner_action.get("canary_plan", {}).get("required") is True and bool(scanner_action.get("rollback_adapter")),
         "test_b_normal_login_no_action": test_b["decision"] == "NO_ACTION",
@@ -3759,10 +3842,11 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
         "policy_valid": policy["status"] == "GUARDED_AUTONOMY_POLICY_VALID",
         "registry_valid": registry["status"] == "GUARDED_ACTION_REGISTRY_VALID",
         "all_actions_low_live": not registry["medium_or_high_actions"],
-        "no_autonomous_external_action_enabled": not any(
-            action.get("enabled") and action.get("apply_adapter") != "ReportOnlyAdapter"
+        "enabled_external_actions_exact_allowlist": sorted(
+            action["action_id"]
             for action in REGISTERED_ACTIONS
-        ),
+            if action.get("enabled") and action.get("apply_adapter") != "ReportOnlyAdapter"
+        ) == sorted(LOW_LIVE_ACTION_IDS),
         "every_action_has_ttl_canary_rollback_validation": all(
             action.get("maximum_ttl") and action.get("canary_plan", {}).get("required") and action.get("rollback_adapter") and action.get("validation_checks")
             for action in REGISTERED_ACTIONS
@@ -3791,6 +3875,11 @@ def self_test(write_artifacts: bool = False) -> Dict[str, Any]:
         "independent_verifier_contract": independent_verifier_test["status"] == "INDEPENDENT_REMEDIATION_VERIFIER_SELF_TEST_OK",
         "proof_gate_ordering": proof_gate_ordering,
         "runtime_crash_safety": runtime_safety_test["status"] == "RUNTIME_SAFETY_SELF_TEST_OK",
+        "low_activation_contract": activation_contract["status"] == "LOW_SCOPE_VALID",
+        "active_flags_low_only": active_flags()["low_live_apply_enabled"] is True
+        and active_flags()["medium_live_apply_enabled"] is False
+        and active_flags()["high_live_apply_enabled"] is False
+        and active_flags()["unrestricted_shell_enabled"] is False,
         "source_self_modification_disabled": POLICY_TEMPLATE["source_self_modification_enabled"] is False,
     }
     findings = [name for name, passed in checks.items() if not passed]
