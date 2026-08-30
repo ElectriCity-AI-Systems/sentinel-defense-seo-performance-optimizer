@@ -3539,6 +3539,13 @@ CANONICAL_HEADER_FIELDS = (
     "circuit_breaker_status",
     "rollback_status",
     "write_canary_status",
+    "write_canary_freshness",
+    "write_canary_last_run",
+    "cloudflare_capability_check",
+    "cloudflare_permission_status",
+    "low_live_readiness",
+    "low_live_readiness_blockers",
+    "low_live_promotion_gate_status",
     "promotion_status",
     "promotion_blockers",
     "owner_priority",
@@ -3647,7 +3654,7 @@ def legacy_supersession_summary(snapshot: Dict[str, Any]) -> Dict[str, Any]:
 def canonical_cell(header: Dict[str, Any], field: str) -> Any:
     """Value for an executive table cell; None renders as UNKNOWN, never as legacy."""
     value = header.get(field)
-    if field == "promotion_blockers":
+    if field in {"promotion_blockers", "low_live_readiness_blockers"}:
         return canonical_truth.format_promotion_blockers(
             canonical_truth.UNKNOWN if value is None else value
         )
@@ -8101,6 +8108,12 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"- Circuit Breaker: {canonical_row('circuit_breaker_status')}",
         f"- Rollback: {canonical_row('rollback_status')}",
         f"- Write Canary: {canonical_row('write_canary_status')}",
+        f"- Write Canary Freshness: {canonical_row('write_canary_freshness')}",
+        f"- Cloudflare Capability Check: {canonical_row('cloudflare_capability_check')}",
+        f"- Cloudflare Permission Status: {canonical_row('cloudflare_permission_status')}",
+        f"- LOW_LIVE Readiness: {canonical_row('low_live_readiness')}",
+        f"- LOW_LIVE Readiness Blockers: {canonical_row('low_live_readiness_blockers')}",
+        f"- LOW_LIVE Promotion Gate: {canonical_row('low_live_promotion_gate_status')}",
         f"- Promotion: {canonical_row('promotion_status')}",
         f"- Emergency Stop: {canonical_row('emergency_stop')}",
         f"- Breach: {canonical_row('breach')}",
@@ -8146,6 +8159,12 @@ def render_markdown(report: Dict[str, Any]) -> str:
         f"| Canonical Emergency Stop | {canonical_row('emergency_stop')} |",
         f"| Canonical Breach | {canonical_row('breach')} |",
         f"| Canonical Write Canary | {canonical_row('write_canary_status')} |",
+        f"| Canonical Write Canary Freshness | {canonical_row('write_canary_freshness')} |",
+        f"| Canonical Cloudflare Capability Check | {canonical_row('cloudflare_capability_check')} |",
+        f"| Canonical Cloudflare Permission Status | {canonical_row('cloudflare_permission_status')} |",
+        f"| Canonical LOW_LIVE Readiness | {canonical_row('low_live_readiness')} |",
+        f"| Canonical LOW_LIVE Readiness Blockers | {canonical_row('low_live_readiness_blockers')} |",
+        f"| Canonical LOW_LIVE Promotion Gate | {canonical_row('low_live_promotion_gate_status')} |",
         f"| Canonical Promotion | {canonical_row('promotion_status')} |",
         f"| Canonical Owner Priority | {canonical_row('owner_priority')} |",
         f"| Canonical Recovery Evidence Window | {canonical_row('recovery_evidence_window_status')} |",

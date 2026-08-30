@@ -20,7 +20,9 @@
   "fixed_order": [
     "collect_current_inputs",
     "refresh_recovery_evidence",
+    "refresh_cloudflare_write_readiness",
     "build_canonical_truth",
+    "finalize_low_live_readiness",
     "evaluate_freshness",
     "validate_canonical_invariants",
     "determine_owner_priority",

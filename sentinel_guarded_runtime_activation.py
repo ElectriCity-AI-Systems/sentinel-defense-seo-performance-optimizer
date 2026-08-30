@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import sentinel_guarded_activation as activation
 import sentinel_guarded_autonomy as guarded
 import sentinel_guarded_systemd_installer as installer
+import sentinel_cloudflare_write_readiness as write_readiness
 
 
 PROJECT_DIR = Path("/srv/sentinel-defense")
@@ -48,6 +49,7 @@ OWNER_MD = REPORT_DIR / "sentinel-runtime-owner-summary.md"
 HEALTH_STATE = STATE_DIR / "challenge-health.json"
 TLS_STATE = STATE_DIR / "runtime-tls-gate.json"
 WRITE_CANARY_STATE = STATE_DIR / "write-canary.json"
+WRITE_READINESS_STATE = STATE_DIR / "write-readiness.json"
 SYSTEMD_MODE_STATE = STATE_DIR / "systemd-mode.json"
 MONITORING_STATE = STATE_DIR / "monitoring-activation.json"
 SCHEDULER_STATE = STATE_DIR / "scheduler-cycles.json"
@@ -716,6 +718,9 @@ def verify_scheduler() -> Dict[str, Any]:
 def activate_guarded_canary() -> Dict[str, Any]:
     scheduler = verify_scheduler()
     write_canary = guarded.load_dict(WRITE_CANARY_STATE)
+    write_gate = write_readiness.runtime_readiness_gate(
+        guarded.load_dict(WRITE_READINESS_STATE)
+    )
     runtime = guarded.load_state()
     circuit = guarded.circuit_status(guarded.load_circuit())
     blockers = []
@@ -723,6 +728,8 @@ def activate_guarded_canary() -> Dict[str, Any]:
         blockers.append("scheduler_verification")
     if write_canary.get("status") != "CLOUDFLARE_WRITE_CANARY_OK":
         blockers.append("cloudflare_write_canary")
+    if write_gate.get("status") != write_readiness.READY:
+        blockers.extend(write_gate.get("blockers", ["cloudflare_write_readiness"]))
     if guarded.deterministic_rollback_test().get("status") != "GUARDED_AUTONOMY_ROLLBACK_TEST_OK":
         blockers.append("rollback_test")
     if circuit.get("status") != "CIRCUIT_BREAKER_ARMED":
@@ -812,12 +819,30 @@ def promotion_logic(
     return {"status": status, "checks": checks, "findings": [name for name, passed in checks.items() if not passed]}
 
 
+def enforce_write_readiness_promotion_gate(
+    promotion: Dict[str, Any],
+    write_gate: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Prevent any promotion when current write readiness is not green."""
+    if write_gate.get("status") == write_readiness.READY:
+        return promotion
+    return {
+        **promotion,
+        "status": "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS",
+        "blockers": write_gate.get("blockers", ["cloudflare_write_readiness"]),
+        "write_readiness_freshness": write_gate.get("freshness"),
+    }
+
+
 def evaluate_promotion() -> Dict[str, Any]:
     runtime = guarded.load_state()
     canary = guarded.load_dict(PROMOTION_STATE)
     started = guarded.parse_timestamp(canary.get("started_at"))
     scheduler = guarded.load_dict(SCHEDULER_STATE)
     write_canary = guarded.load_dict(WRITE_CANARY_STATE)
+    write_gate = write_readiness.runtime_readiness_gate(
+        guarded.load_dict(WRITE_READINESS_STATE)
+    )
     systemd = systemd_runtime_status()
 
     if runtime.get("activation_stage") == STAGE_CANARY and started is not None:
@@ -830,16 +855,19 @@ def evaluate_promotion() -> Dict[str, Any]:
         health_regressions = sum(1 for row in rows if "REGRESSION" in str(row.get("validation_result")))
         unexpected_writes = sum(1 for row in rows if "unexpected_write_path" in str(row.get("reason", "")))
         tls = evaluate_tls()
-        result = promotion_logic(
-            elapsed,
-            successful,
-            failures,
-            rollback_failures,
-            health_regressions,
-            (tls.get("delta_526") or 0) > 0,
-            guarded.validate_policy().get("status") != "GUARDED_AUTONOMY_POLICY_VALID",
-            invalid + guarded.audit_summary().get("invalid_rows", 0),
-            unexpected_writes,
+        result = enforce_write_readiness_promotion_gate(
+            promotion_logic(
+                elapsed,
+                successful,
+                failures,
+                rollback_failures,
+                health_regressions,
+                (tls.get("delta_526") or 0) > 0,
+                guarded.validate_policy().get("status") != "GUARDED_AUTONOMY_POLICY_VALID",
+                invalid + guarded.audit_summary().get("invalid_rows", 0),
+                unexpected_writes,
+            ),
+            write_gate,
         )
         result.update(
             {
@@ -865,9 +893,9 @@ def evaluate_promotion() -> Dict[str, Any]:
             result["activation_stage"] = STAGE_ACTIVE
     elif runtime.get("activation_stage") in {STAGE_MONITORING, STAGE_SCHEDULER}:
         if scheduler.get("status") == "SCHEDULER_VERIFICATION_GREEN" and systemd["timer_active"]:
-            if write_canary.get("status") != "CLOUDFLARE_WRITE_CANARY_OK":
+            if write_gate.get("status") != write_readiness.READY:
                 result = {
-                    "status": "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_CANARY",
+                    "status": "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS",
                     "activation_stage": STAGE_MONITORING,
                     "runtime_stage": STAGE_MONITORING,
                     "scheduler_verification_status": scheduler.get("status"),
@@ -875,7 +903,8 @@ def evaluate_promotion() -> Dict[str, Any]:
                     "guarded_canary_started": False,
                     "guarded_canary_successful_cycles": 0,
                     "promotion_elapsed_minutes": 0.0,
-                    "blockers": ["cloudflare_write_canary"],
+                    "blockers": write_gate.get("blockers", ["cloudflare_write_readiness"]),
+                    "write_readiness_freshness": write_gate.get("freshness"),
                     "monitoring_enabled": True,
                     "timer_active": True,
                     "low_live_apply_enabled": False,
@@ -1013,6 +1042,7 @@ def status_report() -> Dict[str, Any]:
         "tls": guarded.load_dict(TLS_STATE),
         "systemd": systemd,
         "write_canary": guarded.load_dict(WRITE_CANARY_STATE),
+        "write_readiness": guarded.load_dict(WRITE_READINESS_STATE),
         "monitoring": guarded.load_dict(MONITORING_STATE),
         "scheduler": guarded.load_dict(SCHEDULER_STATE),
         "promotion": guarded.load_dict(PROMOTION_STATE),
@@ -1060,6 +1090,14 @@ def self_test() -> Dict[str, Any]:
         0,
     )
     promotion = promotion_logic(61.0, 20, 0, 0, 0, False, False, 0, 0)
+    stale_write_promotion = enforce_write_readiness_promotion_gate(
+        promotion,
+        {
+            "status": write_readiness.NOT_READY,
+            "freshness": write_readiness.STALE,
+            "blockers": ["write_readiness_stale"],
+        },
+    )
     promotion_live = evaluate_promotion()
     canary_circuit = guarded.circuit_breaker_default()
     canary_circuit["actions"] = [{"timestamp": guarded.utc_now(), "action_id": "prior-canary"}]
@@ -1100,7 +1138,11 @@ def self_test() -> Dict[str, Any]:
         "test_i_monitoring_flags": guarded.monitoring_flags()["emergency_stop"] is False
         and guarded.monitoring_flags()["production_apply_lock"] is True,
         "test_j_promotion": promotion["status"] == "RUNTIME_PROMOTION_GREEN",
-        "test_k_promotion_blocked_by_write_canary": promotion_live["status"] == "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_CANARY",
+        "test_j_canary_promotion_requires_current_write_readiness": (
+            stale_write_promotion["status"] == "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS"
+            and stale_write_promotion["blockers"] == ["write_readiness_stale"]
+        ),
+        "test_k_promotion_blocked_by_write_readiness": promotion_live["status"] == "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS",
         "test_l_scheduler_cycles_preserved": promotion_live.get("scheduler_successful_cycles", 0) >= 3,
         "test_m_no_canary_cycles_on_blocked": promotion_live.get("guarded_canary_successful_cycles", 0) == 0,
         "test_n_monitoring_not_fallback": promotion_live.get("runtime_stage") in {STAGE_MONITORING, STAGE_SCHEDULER},
@@ -1278,6 +1320,7 @@ def render_promotion(value: Dict[str, Any]) -> str:
 
 def render_status(value: Dict[str, Any]) -> str:
     flags = value.get("flags", {})
+    readiness = value.get("write_readiness", {})
     return "\n".join(
         [
             "# Sentinel Guarded Runtime Activation",
@@ -1288,6 +1331,10 @@ def render_status(value: Dict[str, Any]) -> str:
             f"- LOW_LIVE enabled: `{str(flags.get('low_live_apply_enabled', False)).lower()}`",
             f"- MEDIUM enabled: `{str(flags.get('medium_live_apply_enabled', False)).lower()}`",
             f"- HIGH enabled: `{str(flags.get('high_live_apply_enabled', False)).lower()}`",
+            f"- write canary current status: `{readiness.get('write_canary', {}).get('current_status', 'UNKNOWN')}`",
+            f"- write canary freshness: `{readiness.get('write_canary', {}).get('freshness', 'UNKNOWN')}`",
+            f"- Cloudflare capability: `{readiness.get('capability', {}).get('status', 'UNKNOWN')}`",
+            f"- LOW_LIVE readiness: `{readiness.get('low_live_readiness', {}).get('status', 'UNKNOWN')}`",
             f"- emergency stop: `{str(flags.get('emergency_stop', True)).lower()}`",
             f"- breach: `{str(flags.get('breach', False)).lower()}`",
         ]

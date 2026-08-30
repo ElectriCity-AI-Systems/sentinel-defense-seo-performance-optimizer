@@ -60,6 +60,22 @@
         "source_class": "CURRENT_RUNTIME"
       }
     ],
+    "cloudflare_capability_check": [
+      {
+        "allow_stale_informational": false,
+        "expression": "capability.status",
+        "source": "state/guarded-autonomy/write-readiness.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "cloudflare_permission_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "capability.permission_status",
+        "source": "state/guarded-autonomy/write-readiness.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
     "consistency_status": [
       {
         "allow_stale_informational": false,
@@ -257,6 +273,30 @@
         "allow_stale_informational": true,
         "expression": "low_live_apply_enabled",
         "source": "state/guarded-autonomy/runtime-promotion.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "low_live_promotion_gate_status": [
+      {
+        "allow_stale_informational": false,
+        "expression": "promotion_gate_status",
+        "source": "state/guarded-autonomy/write-readiness.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "low_live_readiness": [
+      {
+        "allow_stale_informational": false,
+        "expression": "low_live_readiness.status",
+        "source": "state/guarded-autonomy/write-readiness.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "low_live_readiness_blockers": [
+      {
+        "allow_stale_informational": false,
+        "expression": "low_live_readiness.blockers",
+        "source": "state/guarded-autonomy/write-readiness.json",
         "source_class": "CURRENT_RUNTIME"
       }
     ],
@@ -616,17 +656,27 @@
         "source_class": "CURRENT_ORIGIN_DIAGNOSTICS"
       }
     ],
+    "write_canary_freshness": [
+      {
+        "allow_stale_informational": false,
+        "expression": "write_canary.freshness",
+        "source": "state/guarded-autonomy/write-readiness.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
+    "write_canary_last_run": [
+      {
+        "allow_stale_informational": false,
+        "expression": "write_canary.last_run_at",
+        "source": "state/guarded-autonomy/write-readiness.json",
+        "source_class": "CURRENT_RUNTIME"
+      }
+    ],
     "write_canary_status": [
       {
-        "allow_stale_informational": true,
-        "expression": "status",
-        "source": "state/guarded-autonomy/write-canary.json",
-        "source_class": "CURRENT_RUNTIME"
-      },
-      {
-        "allow_stale_informational": true,
-        "expression": "write_canary.status",
-        "source": "reports/latest/sentinel-guarded-runtime-activation.json",
+        "allow_stale_informational": false,
+        "expression": "write_canary.current_status",
+        "source": "state/guarded-autonomy/write-readiness.json",
         "source_class": "CURRENT_RUNTIME"
       }
     ]

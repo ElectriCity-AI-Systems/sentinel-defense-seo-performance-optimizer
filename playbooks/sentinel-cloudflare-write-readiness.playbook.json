@@ -1,0 +1,23 @@
+{
+  "name": "sentinel-cloudflare-write-readiness",
+  "schema_version": 1,
+  "purpose": "Separate historical write-canary evidence from a fresh, non-mutating Cloudflare capability and LOW_LIVE readiness decision.",
+  "commands": [
+    "python3 sentinel_cloudflare_write_readiness.py --self-test",
+    "python3 sentinel_cloudflare_write_readiness.py --evaluate",
+    "python3 sentinel_cloudflare_write_readiness.py --status"
+  ],
+  "cloudflare_methods": [
+    "GET"
+  ],
+  "mutations_allowed": false,
+  "activation_allowed": false,
+  "safety": {
+    "low_live": false,
+    "medium": false,
+    "high": false,
+    "production_apply_lock": true,
+    "credentials_disclosed": false,
+    "fail_closed": true
+  }
+}

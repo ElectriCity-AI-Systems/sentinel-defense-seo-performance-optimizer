@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import sentinel_canonical_invariants as invariants
 import sentinel_canonical_truth as canonical_truth
+import sentinel_cloudflare_write_readiness as write_readiness
 import sentinel_monitoring_decision_engine as monitoring_decision
 
 
@@ -84,7 +85,9 @@ UNKNOWN = canonical_truth.UNKNOWN
 PIPELINE_STEPS = (
     "collect_current_inputs",
     "refresh_recovery_evidence",
+    "refresh_cloudflare_write_readiness",
     "build_canonical_truth",
+    "finalize_low_live_readiness",
     "evaluate_freshness",
     "validate_canonical_invariants",
     "determine_owner_priority",
@@ -546,6 +549,16 @@ def build_runtime_summary(canonical: Dict[str, Any]) -> Dict[str, Any]:
         "circuit_breaker_status": value("circuit_breaker_status") or UNKNOWN,
         "rollback_status": value("rollback_status") or UNKNOWN,
         "write_canary_status": value("write_canary_status") or UNKNOWN,
+        "write_canary_freshness": value("write_canary_freshness") or UNKNOWN,
+        "write_canary_last_run": value("write_canary_last_run"),
+        "cloudflare_capability_check": value("cloudflare_capability_check") or UNKNOWN,
+        "cloudflare_permission_status": value("cloudflare_permission_status") or UNKNOWN,
+        "low_live_readiness": value("low_live_readiness") or UNKNOWN,
+        "low_live_readiness_blockers": canonical_truth.normalize_promotion_blockers_value(
+            value("low_live_readiness_blockers")
+            if value("low_live_readiness_blockers") is not None else UNKNOWN
+        ),
+        "low_live_promotion_gate_status": value("low_live_promotion_gate_status") or UNKNOWN,
         "promotion_status": value("promotion_status") or UNKNOWN,
         "promotion_blockers": canonical_truth.normalize_promotion_blockers_value(
             value("promotion_blockers") if value("promotion_blockers") is not None else UNKNOWN
@@ -667,7 +680,21 @@ def run_pipeline(build_master: bool = True) -> Dict[str, Any]:
         force=False, persist_outputs=True
     )
 
+    # Refresh the current read-only capability envelope before canonical truth.
+    # This never calls the mutating write-canary path and cannot activate LOW.
+    write_readiness_probe = write_readiness.evaluate(
+        None, perform_remote=True, persist=True
+    )
+
     # Step 3 must not be preceded by any summary rendering: canonical truth first.
+    canonical_report = build_canonical_truth(recovery_refresh)
+
+    # Finalize the owner-readiness decision against that exact canonical
+    # snapshot, then resolve once more so every downstream consumer sees the
+    # same readiness facts.
+    write_readiness_result = write_readiness.evaluate(
+        canonical_report, perform_remote=False, persist=True
+    )
     canonical_report = build_canonical_truth(recovery_refresh)
     canonical = canonical_report.get("canonical", {})
 
@@ -705,6 +732,15 @@ def run_pipeline(build_master: bool = True) -> Dict[str, Any]:
             "status": recovery_refresh.get("refresh_status"),
             "evidence_window": recovery_refresh.get("evidence_window"),
             "autonomous_decision": recovery_refresh.get("autonomous_decision"),
+        },
+        "cloudflare_write_readiness": {
+            "status": write_readiness_result.get("status"),
+            "write_canary_status": write_readiness_result.get("write_canary", {}).get("current_status"),
+            "write_canary_freshness": write_readiness_result.get("write_canary", {}).get("freshness"),
+            "capability_status": write_readiness_result.get("capability", {}).get("status"),
+            "permission_status": write_readiness_result.get("capability", {}).get("permission_status"),
+            "low_live_readiness": write_readiness_result.get("low_live_readiness", {}).get("status"),
+            "real_mutation_performed": False,
         },
         "inputs": inputs,
         "website": website,

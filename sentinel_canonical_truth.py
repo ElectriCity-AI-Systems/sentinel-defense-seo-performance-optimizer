@@ -279,6 +279,14 @@ SOURCE_LIST: Tuple[Source, ...] = (
         "Cloudflare write canary state of record.",
     ),
     Source(
+        "runtime_write_readiness",
+        GUARDED_STATE_DIR / "write-readiness.json",
+        CLASS_RUNTIME,
+        KIND_RUNTIME_CYCLE,
+        "write_readiness",
+        "Fresh read-only Cloudflare capability and LOW_LIVE readiness evidence.",
+    ),
+    Source(
         "runtime_circuit_breaker",
         GUARDED_STATE_DIR / "circuit-breaker.json",
         CLASS_RUNTIME,
@@ -914,8 +922,28 @@ RUNTIME_FIELDS: Dict[str, List[Candidate]] = {
         cand("runtime_activation", "promotion.blockers", allow_stale=True),
     ],
     "write_canary_status": [
-        cand("runtime_write_canary", "status", allow_stale=True),
-        cand("runtime_activation", "write_canary.status", allow_stale=True),
+        cand("runtime_write_readiness", "write_canary.current_status"),
+    ],
+    "write_canary_freshness": [
+        cand("runtime_write_readiness", "write_canary.freshness"),
+    ],
+    "write_canary_last_run": [
+        cand("runtime_write_readiness", "write_canary.last_run_at"),
+    ],
+    "cloudflare_capability_check": [
+        cand("runtime_write_readiness", "capability.status"),
+    ],
+    "cloudflare_permission_status": [
+        cand("runtime_write_readiness", "capability.permission_status"),
+    ],
+    "low_live_readiness": [
+        cand("runtime_write_readiness", "low_live_readiness.status"),
+    ],
+    "low_live_readiness_blockers": [
+        cand("runtime_write_readiness", "low_live_readiness.blockers"),
+    ],
+    "low_live_promotion_gate_status": [
+        cand("runtime_write_readiness", "promotion_gate_status"),
     ],
     "last_cycle_id": [
         cand("runtime_guarded_autonomy", "last_cycle.cycle_id"),
@@ -1028,6 +1056,11 @@ REQUIRED_FIELDS = (
     "emergency_stop",
     "breach",
     "write_canary_status",
+    "write_canary_freshness",
+    "cloudflare_capability_check",
+    "cloudflare_permission_status",
+    "low_live_readiness",
+    "low_live_promotion_gate_status",
     "promotion_status",
     "website_status",
     "total_5xx",
@@ -1764,6 +1797,13 @@ def assemble_canonical(
         "circuit_breaker_status": provenance(fields, "circuit_breaker_status"),
         "rollback_status": provenance(fields, "rollback_status"),
         "write_canary_status": provenance(fields, "write_canary_status"),
+        "write_canary_freshness": provenance(fields, "write_canary_freshness"),
+        "write_canary_last_run": provenance(fields, "write_canary_last_run"),
+        "cloudflare_capability_check": provenance(fields, "cloudflare_capability_check"),
+        "cloudflare_permission_status": provenance(fields, "cloudflare_permission_status"),
+        "low_live_readiness": provenance(fields, "low_live_readiness"),
+        "low_live_readiness_blockers": provenance(fields, "low_live_readiness_blockers"),
+        "low_live_promotion_gate_status": provenance(fields, "low_live_promotion_gate_status"),
         "promotion_status": provenance(fields, "promotion_status"),
         "promotion_blockers": promotion_blockers_provenance(fields),
         "last_cycle_id": provenance(fields, "last_cycle_id"),
@@ -2043,6 +2083,9 @@ def build_daily_summary_blocks(report: Dict[str, Any]) -> Dict[str, Any]:
         "LOW_LIVE:",
         enabled_text(c("low_live_enabled")),
         "",
+        "LOW_LIVE Readiness:",
+        show(c("low_live_readiness")),
+        "",
         "Production Apply:",
         "LOCKED" if c("production_apply_lock").get("value") is True else (
             UNKNOWN if c("production_apply_lock").get("resolution") != "RESOLVED" else "UNLOCKED"
@@ -2106,6 +2149,24 @@ def build_daily_summary_blocks(report: Dict[str, Any]) -> Dict[str, Any]:
         "",
         "Write Canary:",
         show(c("write_canary_status")),
+        "",
+        "Write Canary Freshness:",
+        show(c("write_canary_freshness")),
+        "",
+        "Cloudflare Capability Check:",
+        show(c("cloudflare_capability_check")),
+        "",
+        "Cloudflare Permission Status:",
+        show(c("cloudflare_permission_status")),
+        "",
+        "LOW_LIVE Readiness:",
+        show(c("low_live_readiness")),
+        "",
+        "LOW_LIVE Readiness Blockers:",
+        format_promotion_blockers(c("low_live_readiness_blockers").get("value")),
+        "",
+        "LOW_LIVE Promotion Gate:",
+        show(c("low_live_promotion_gate_status")),
         "",
         "Promotion:",
         show(c("promotion_status")),
@@ -2480,6 +2541,11 @@ def persist(report: Dict[str, Any]) -> None:
         "emergency_stop": canonical["emergency_stop"].get("value"),
         "breach": canonical["breach"].get("value"),
         "write_canary_status": canonical["write_canary_status"].get("value"),
+        "write_canary_freshness": canonical["write_canary_freshness"].get("value"),
+        "cloudflare_capability_check": canonical["cloudflare_capability_check"].get("value"),
+        "cloudflare_permission_status": canonical["cloudflare_permission_status"].get("value"),
+        "low_live_readiness": canonical["low_live_readiness"].get("value"),
+        "low_live_promotion_gate_status": canonical["low_live_promotion_gate_status"].get("value"),
         "promotion_status": canonical["promotion_status"].get("value"),
         "owner_priority": canonical["owner_priority"].get("value"),
         "total_5xx": canonical["total_5xx"].get("value"),
@@ -2911,6 +2977,50 @@ def run_self_test() -> Dict[str, Any]:
         == "cloudflare_write_canary"
     )
 
+    # Regression: a fresh readiness envelope must describe an old canary as
+    # stale. The old write-canary state itself can never regain current-truth
+    # authority merely because a newer runtime report embeds it.
+    stale_canary_fields = resolve_fields(_synthetic_sources(
+        runtime_write_readiness={
+            "generated_at": "2026-08-12T14:00:00Z",
+            "write_canary": {
+                "current_status": "CLOUDFLARE_WRITE_CANARY_STALE",
+                "freshness": "STALE_EXCLUDED_FROM_CURRENT_READINESS",
+                "last_run_at": "2026-07-01T00:00:00Z",
+            },
+            "capability": {
+                "status": "CLOUDFLARE_WRITE_CAPABILITY_PERMISSION_UNPROVEN",
+                "permission_status": "ZONE_WAF_WRITE_PERMISSION_UNPROVEN",
+            },
+            "low_live_readiness": {
+                "status": "NOT_READY_FOR_OWNER_ACTIVATION",
+                "blockers": ["write_canary_stale"],
+            },
+            "promotion_gate_status": "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS",
+        },
+        runtime_write_canary={
+            "generated_at": "2026-07-01T00:00:00Z",
+            "status": "CLOUDFLARE_WRITE_CANARY_BLOCKED",
+            "__freshness__": STALE_INFORMATIONAL,
+        },
+    ))
+    checks["test_d_stale_canary_not_reused_as_current"] = (
+        value_of(stale_canary_fields, "write_canary_status")
+        == "CLOUDFLARE_WRITE_CANARY_STALE"
+        and stale_canary_fields["write_canary_status"]["source_id"]
+        == "runtime_write_readiness"
+    )
+    old_only_fields = resolve_fields(_synthetic_sources(
+        runtime_write_canary={
+            "generated_at": "2026-07-01T00:00:00Z",
+            "status": "CLOUDFLARE_WRITE_CANARY_BLOCKED",
+            "__freshness__": STALE_INFORMATIONAL,
+        },
+    ))
+    checks["test_d_old_canary_without_fresh_readiness_fails_closed"] = (
+        old_only_fields["write_canary_status"]["resolution"] == "UNRESOLVED"
+    )
+
     # Regression: a concrete users/me timeout requires a current path count
     # matching the diagnostic count. Missing or mismatched counts fail closed.
     compatible_wp_fields = resolve_fields(_synthetic_sources(
@@ -3274,6 +3384,23 @@ def run_self_test() -> Dict[str, Any]:
             "generated_at": "2026-08-12T13:00:00Z",
             "status": "CLOUDFLARE_WRITE_CANARY_BLOCKED",
         },
+        runtime_write_readiness={
+            "generated_at": "2026-08-12T13:00:00Z",
+            "write_canary": {
+                "current_status": "CLOUDFLARE_WRITE_CANARY_BLOCKED",
+                "freshness": "CURRENT",
+                "last_run_at": "2026-08-12T13:00:00Z",
+            },
+            "capability": {
+                "status": "CLOUDFLARE_WRITE_CAPABILITY_PERMISSION_UNPROVEN",
+                "permission_status": "ZONE_WAF_WRITE_PERMISSION_UNPROVEN",
+            },
+            "low_live_readiness": {
+                "status": "NOT_READY_FOR_OWNER_ACTIVATION",
+                "blockers": ["cloudflare_write_permission_unproven"],
+            },
+            "promotion_gate_status": "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS",
+        },
         website=critical_payload,
         local={"generated_at_utc": "2026-08-12T14:00:00Z", "overall_status": "OK"},
     )
@@ -3335,7 +3462,9 @@ def run_self_test() -> Dict[str, Any]:
             "generated_at", "overall_status", "website_status", "runtime_status",
             "runtime_stage", "autonomy_level", "monitoring_enabled", "timer_active",
             "scheduler_status", "low_live_enabled", "production_apply_lock",
-            "emergency_stop", "breach", "write_canary_status", "promotion_status",
+            "emergency_stop", "breach", "write_canary_status", "write_canary_freshness",
+            "cloudflare_capability_check", "cloudflare_permission_status",
+            "low_live_readiness", "low_live_promotion_gate_status", "promotion_status",
             "owner_priority", "total_5xx", "nowplaying_504", "wp_users_me_504",
             "source_map_404", "rolling_window_status",
         )
