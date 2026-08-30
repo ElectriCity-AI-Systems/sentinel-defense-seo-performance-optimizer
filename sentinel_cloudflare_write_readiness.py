@@ -49,6 +49,7 @@ CANARY_MISSING = "CLOUDFLARE_WRITE_CANARY_MISSING"
 CANARY_INVALID = "CLOUDFLARE_WRITE_CANARY_INVALID_TIMESTAMP"
 
 CAPABILITY_VERIFIED = "CLOUDFLARE_WRITE_CAPABILITY_VERIFIED_READ_ONLY"
+CAPABILITY_VERIFIED_BY_CANARY = "CLOUDFLARE_WRITE_CAPABILITY_VERIFIED_BY_FRESH_CANARY"
 CAPABILITY_CAPACITY_BLOCKED = "CLOUDFLARE_WRITE_CAPABILITY_BLOCKED_RULESET_CAPACITY"
 CAPABILITY_PERMISSION_BLOCKED = "CLOUDFLARE_WRITE_CAPABILITY_BLOCKED_PERMISSION"
 CAPABILITY_PERMISSION_UNPROVEN = "CLOUDFLARE_WRITE_CAPABILITY_PERMISSION_UNPROVEN"
@@ -56,8 +57,11 @@ CAPABILITY_AUTH_BLOCKED = "CLOUDFLARE_WRITE_CAPABILITY_BLOCKED_AUTH"
 CAPABILITY_SCOPE_BLOCKED = "CLOUDFLARE_WRITE_CAPABILITY_BLOCKED_FIXED_SCOPE"
 
 PERMISSION_VERIFIED = "ZONE_WAF_WRITE_PERMISSION_VERIFIED"
+PERMISSION_VERIFIED_BY_CANARY = "ZONE_WAF_WRITE_PERMISSION_VERIFIED_BY_FRESH_CANARY"
 PERMISSION_MISSING = "ZONE_WAF_WRITE_PERMISSION_MISSING"
 PERMISSION_UNPROVEN = "ZONE_WAF_WRITE_PERMISSION_UNPROVEN"
+
+CAPABILITY_VERIFIED_STATUSES = frozenset({CAPABILITY_VERIFIED, CAPABILITY_VERIFIED_BY_CANARY})
 
 READY = "READY_FOR_OWNER_ACTIVATION"
 NOT_READY = "NOT_READY_FOR_OWNER_ACTIVATION"
@@ -391,6 +395,31 @@ def classify_historical_canary(value: Dict[str, Any], now: Optional[datetime] = 
         age_seconds = max(0.0, (moment - parsed).total_seconds())
         freshness = CURRENT if age_seconds <= CANARY_CURRENT_SECONDS else STALE
         current_status = value.get("status") if freshness == CURRENT else CANARY_STALE
+    before_hash = value.get("before_hash")
+    after_hash = value.get("after_hash")
+    hash_restored = bool(
+        isinstance(before_hash, str)
+        and re.fullmatch(r"[a-f0-9]{64}", before_hash)
+        and after_hash == before_hash
+    )
+    permission_proven = bool(
+        freshness == CURRENT
+        and current_status == CANARY_OK
+        and value.get("reason") == "disabled_rule_created_verified_deleted_and_absence_verified"
+        and value.get("created") is True
+        and value.get("enabled") is False
+        and value.get("verified") is True
+        and value.get("deleted") is True
+        and value.get("deletion_verified") is True
+        and value.get("traffic_effect") is False
+        and value.get("fixed_zone_scope") is True
+        and value.get("disabled_rule_required") is True
+        and value.get("managed_challenge_only") is True
+        and value.get("fixed_rule_identity") == guarded.WRITE_CANARY_DESCRIPTION
+        and value.get("credential_values_disclosed") is False
+        and value.get("breach") is False
+        and hash_restored
+    )
     return {
         "source": str(HISTORICAL_CANARY_JSON.relative_to(PROJECT_DIR)),
         "last_run_at": generated_at,
@@ -402,7 +431,37 @@ def classify_historical_canary(value: Dict[str, Any], now: Optional[datetime] = 
         "historical_cloudflare_error_codes": value.get("cloudflare_error_codes", []),
         "historical_rule_created": value.get("created") is True,
         "historical_traffic_effect": value.get("traffic_effect") is True,
+        "historical_rule_enabled": value.get("enabled"),
+        "historical_rule_verified": value.get("verified") is True,
+        "historical_rule_deleted": value.get("deleted") is True,
+        "historical_deletion_verified": value.get("deletion_verified") is True,
+        "historical_hash_restored": hash_restored,
+        "write_permission_proven_by_fresh_canary": permission_proven,
     }
+
+
+def apply_fresh_canary_permission_evidence(
+    canary: Dict[str, Any],
+    capability: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Use a completed fixed-scope canary as direct permission evidence."""
+    result = dict(capability)
+    current_scope_ok = bool(
+        result.get("token_active") is True
+        and result.get("fixed_zone_active") is True
+        and result.get("custom_ruleset_readable") is True
+        and result.get("custom_rule_capacity_available") is True
+        and result.get("dedicated_fixed_canary_count") == 0
+    )
+    if canary.get("write_permission_proven_by_fresh_canary") is True and current_scope_ok:
+        result["metadata_permission_status"] = result.get("permission_status")
+        result["permission_status"] = PERMISSION_VERIFIED_BY_CANARY
+        result["status"] = CAPABILITY_VERIFIED_BY_CANARY
+        result["write_permission_evidence"] = (
+            "FRESH_FIXED_DISABLED_RULE_CREATE_READBACK_DELETE_ABSENCE_AND_HASH_RESTORE"
+        )
+        result["permission_evidence_includes_prior_mutation"] = True
+    return result
 
 
 def runtime_readiness_gate(value: Dict[str, Any], now: Optional[datetime] = None) -> Dict[str, Any]:
@@ -468,7 +527,7 @@ def readiness_gate(
         "breach_false": canonical_value(canonical_report, "breach") is False,
         "write_canary_current": canary.get("freshness") == CURRENT,
         "write_canary_successful": canary.get("current_status") == CANARY_OK,
-        "write_capability_verified": capability.get("status") == CAPABILITY_VERIFIED,
+        "write_capability_verified": capability.get("status") in CAPABILITY_VERIFIED_STATUSES,
         "rollback_verified": rollback_status == "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
         "low_live_still_disabled": canonical_value(canonical_report, "low_live_enabled") is False,
         "medium_disabled": canonical_value(canonical_report, "medium_live_enabled") is False,
@@ -512,6 +571,7 @@ def evaluate(
                 "permission_status": PERMISSION_UNPROVEN,
             }
 
+    capability = apply_fresh_canary_permission_evidence(historical, capability)
     rollback = guarded.deterministic_rollback_test()
     gate = readiness_gate(canonical_report, historical, capability, rollback.get("status", "UNKNOWN"))
     promotion = PROMOTION_READY if gate["status"] == READY else PROMOTION_BLOCKED
@@ -621,10 +681,35 @@ def self_test() -> Dict[str, Any]:
     current_ok = classify_historical_canary({
         "generated_at": "2026-08-30T00:00:00Z",
         "status": CANARY_OK,
+        "reason": "disabled_rule_created_verified_deleted_and_absence_verified",
         "created": True,
+        "enabled": False,
+        "verified": True,
+        "deleted": True,
+        "deletion_verified": True,
         "traffic_effect": False,
+        "fixed_zone_scope": True,
+        "disabled_rule_required": True,
+        "managed_challenge_only": True,
+        "fixed_rule_identity": guarded.WRITE_CANARY_DESCRIPTION,
+        "credential_values_disclosed": False,
+        "breach": False,
+        "before_hash": "a" * 64,
+        "after_hash": "a" * 64,
     }, now)
-    capability_ok = {"status": CAPABILITY_VERIFIED, "permission_status": PERMISSION_VERIFIED}
+    capability_unproven = {
+        "status": CAPABILITY_PERMISSION_UNPROVEN,
+        "permission_status": PERMISSION_UNPROVEN,
+        "token_active": True,
+        "fixed_zone_active": True,
+        "custom_ruleset_readable": True,
+        "custom_rule_capacity_available": True,
+        "dedicated_fixed_canary_count": 0,
+    }
+    capability_ok = apply_fresh_canary_permission_evidence(current_ok, capability_unproven)
+    incomplete_canary = dict(current_ok)
+    incomplete_canary["write_permission_proven_by_fresh_canary"] = False
+    incomplete_capability = apply_fresh_canary_permission_evidence(incomplete_canary, capability_unproven)
     ready = readiness_gate(
         _fixture_canonical(), current_ok, capability_ok,
         "GUARDED_AUTONOMY_ROLLBACK_TEST_OK",
@@ -652,6 +737,11 @@ def self_test() -> Dict[str, Any]:
         "stale_canary_not_current_truth": stale["freshness"] == STALE and stale["current_status"] == CANARY_STALE,
         "stale_blocked_not_green": stale["current_status"] != CANARY_OK,
         "all_green_yields_owner_readiness_only": ready["status"] == READY,
+        "fresh_complete_canary_proves_permission": (
+            capability_ok["status"] == CAPABILITY_VERIFIED_BY_CANARY
+            and capability_ok["permission_status"] == PERMISSION_VERIFIED_BY_CANARY
+        ),
+        "incomplete_canary_fails_closed": incomplete_capability["status"] == CAPABILITY_PERMISSION_UNPROVEN,
         "unknown_safety_fails_closed": unknown_safety["status"] == NOT_READY,
         "stale_readiness_envelope_fails_closed": runtime_readiness_gate(
             {"generated_at": "2026-08-29T00:00:00Z", "low_live_readiness": {"status": READY}}, now

@@ -1098,7 +1098,15 @@ def self_test() -> Dict[str, Any]:
             "blockers": ["write_readiness_stale"],
         },
     )
+    current_write_gate = write_readiness.runtime_readiness_gate(
+        guarded.load_dict(WRITE_READINESS_STATE)
+    )
     promotion_live = evaluate_promotion()
+    expected_live_promotion = (
+        "RUNTIME_PROMOTION_READY_FOR_CANARY"
+        if current_write_gate.get("status") == write_readiness.READY
+        else "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS"
+    )
     canary_circuit = guarded.circuit_breaker_default()
     canary_circuit["actions"] = [{"timestamp": guarded.utc_now(), "action_id": "prior-canary"}]
     canary_rate_limit = guarded.rate_limit_allows(
@@ -1142,7 +1150,11 @@ def self_test() -> Dict[str, Any]:
             stale_write_promotion["status"] == "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS"
             and stale_write_promotion["blockers"] == ["write_readiness_stale"]
         ),
-        "test_k_promotion_blocked_by_write_readiness": promotion_live["status"] == "RUNTIME_PROMOTION_BLOCKED_BY_WRITE_READINESS",
+        "test_k_promotion_matches_current_write_readiness": (
+            promotion_live["status"] == expected_live_promotion
+            and promotion_live.get("low_live_apply_enabled") is False
+            and promotion_live.get("production_apply_lock") is True
+        ),
         "test_l_scheduler_cycles_preserved": promotion_live.get("scheduler_successful_cycles", 0) >= 3,
         "test_m_no_canary_cycles_on_blocked": promotion_live.get("guarded_canary_successful_cycles", 0) == 0,
         "test_n_monitoring_not_fallback": promotion_live.get("runtime_stage") in {STAGE_MONITORING, STAGE_SCHEDULER},
