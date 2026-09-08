@@ -12,6 +12,7 @@ import argparse
 import ast
 import json
 import re
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -20,7 +21,7 @@ import sentinel_canonical_truth as canonical_truth
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
-SCHEMA_VERSION = "sentinel-origin-failure-diagnostics-10.17.1"
+SCHEMA_VERSION = "sentinel-origin-failure-diagnostics-10.17.2"
 
 REPORT_DIR = PROJECT_DIR / "reports/latest"
 STATE_DIR = PROJECT_DIR / "state/adaptive-learning"
@@ -29,6 +30,7 @@ PLAYBOOK_DIR = PROJECT_DIR / "playbooks"
 
 MASTER_CONSISTENCY_JSON = REPORT_DIR / "sentinel-master-consistency.json"
 WEBSITE_JSON = REPORT_DIR / "sentinel-defense-report.json"
+MONITOR_ROOT = PROJECT_DIR / "cloudflare-monitor"
 PREFERRED_INPUTS = (
     MASTER_CONSISTENCY_JSON,
     REPORT_DIR / "sentinel-master-executive-summary.md",
@@ -88,6 +90,9 @@ ALLOWED_INPUT_ROOTS = tuple(
 )
 ALLOWED_INPUT_SUFFIXES = {".json", ".jsonl", ".md", ".txt", ".log", ".csv"}
 MAX_INPUT_BYTES = 8 * 1024 * 1024
+MAX_SNAPSHOT_COMPARISON_GAP_SECONDS = 2 * 60 * 60
+SNAPSHOT_ID_RE = re.compile(r"\d{8}-\d{6}")
+MONITOR_JSON_FILES = {"comparison.json", "metrics.json", "status-24h.json"}
 INPUT_KEYWORDS = (
     "origin", "php", "wordpress", "nginx", "ionos", "5xx", "tls", "ssl",
     "certificate", "sitelock", "rolling", "website", "master", "cloudflare",
@@ -1524,9 +1529,17 @@ def build_timeline(previous: Dict[str, Any], current: Dict[str, Any], website: D
             consecutive += 1
         else:
             break
+    totals = previous.get("total_5xx"), current.get("total_5xx")
+    peak_growth_at = None
+    if all(type(value) is int for value in totals):
+        peak_growth_at = (
+            current.get("generated_at_utc")
+            if totals[1] >= totals[0]
+            else previous.get("generated_at_utc")
+        )
     return {
         "first_growth_at": last_significant,
-        "peak_growth_at": current.get("generated_at_utc") if current.get("total_5xx", 0) >= previous.get("total_5xx", 0) else previous.get("generated_at_utc"),
+        "peak_growth_at": peak_growth_at,
         "last_growth_at": last_significant,
         "stable_since": stable_since,
         "latest_delta": focus.get("latest_delta"),
@@ -1671,13 +1684,103 @@ This summary reports correlation only. Verified human-user impact is unknown. Pr
     return sanitize_public_text(text)
 
 
+def unavailable_previous_snapshot(
+    status: str,
+    reason: str,
+    snapshot_id: Optional[str] = None,
+    generated_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "snapshot_id": snapshot_id,
+        "generated_at_utc": generated_at,
+        "website_status": None,
+        "total_5xx": None,
+        "status_code_counts": {str(code): None for code in STATUS_HYPOTHESES},
+        "root_504": None,
+        "comparison_status": status,
+        "comparison_reason": reason,
+        "source": "cloudflare-monitor-fixed-run",
+    }
+
+
+def website_snapshot_identity(website: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    context = website.get("monitor_attempt_context") if isinstance(website, dict) else None
+    evaluated = context.get("evaluated_run") if isinstance(context, dict) else None
+    if not isinstance(evaluated, dict) or evaluated.get("status") != "SUCCESS":
+        return None, None
+    run_id = evaluated.get("run_id")
+    generated_at = evaluated.get("generated_at_utc")
+    if not isinstance(run_id, str) or not SNAPSHOT_ID_RE.fullmatch(run_id):
+        return None, None
+    return run_id, generated_at if isinstance(generated_at, str) else None
+
+
+def read_monitor_json(
+    monitor_root: Path, run_id: str, name: str
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    if not SNAPSHOT_ID_RE.fullmatch(run_id) or name not in MONITOR_JSON_FILES:
+        return None, "blocked_file_name"
+    try:
+        root = monitor_root.resolve(strict=True)
+        run_dir = monitor_root / run_id
+        if run_dir.is_symlink() or not run_dir.is_dir():
+            return None, "missing_or_symlink"
+        resolved_run = run_dir.resolve(strict=True)
+        if resolved_run.parent != root:
+            return None, "path_escape"
+        path = resolved_run / name
+        if path.is_symlink() or not path.is_file():
+            return None, "missing_or_symlink"
+        resolved = path.resolve(strict=True)
+        if resolved.parent != resolved_run:
+            return None, "path_escape"
+        if resolved.stat().st_size > MAX_INPUT_BYTES:
+            return None, "file_too_large"
+        value = json.loads(resolved.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None, "invalid_json"
+    except OSError:
+        return None, "read_error"
+    return (value, "ok") if isinstance(value, dict) else (None, "not_object")
+
+
+def raw_monitor_status_counts(payload: Dict[str, Any]) -> Optional[Dict[str, int]]:
+    if payload.get("errors") not in (None, []):
+        return None
+    try:
+        zones = payload["data"]["viewer"]["zones"]
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(zones, list) or len(zones) != 1 or not isinstance(zones[0], dict):
+        return None
+    rows = zones[0].get("httpRequestsAdaptiveGroups")
+    if not isinstance(rows, list):
+        return None
+    counts = {str(code): 0 for code in STATUS_HYPOTHESES}
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        dimensions = row.get("dimensions")
+        count = row.get("count")
+        if not isinstance(dimensions, dict) or type(count) is not int or count < 0:
+            return None
+        status = dimensions.get("edgeResponseStatus")
+        if type(status) is not int:
+            return None
+        if status in STATUS_HYPOTHESES:
+            counts[str(status)] += count
+    return counts
+
+
 def current_snapshot(website: Dict[str, Any]) -> Dict[str, Any]:
     counts = status_counts(website)
     total = metric_value(website, "total_5xx")
     if total is None:
         total = sum(counts.values())
+    snapshot_id, snapshot_generated_at = website_snapshot_identity(website)
     return {
-        "generated_at_utc": website.get("generated_at_utc"),
+        "snapshot_id": snapshot_id,
+        "generated_at_utc": snapshot_generated_at or website.get("generated_at_utc"),
         "website_status": website.get("overall_status") or "UNKNOWN",
         "total_5xx": total,
         "status_code_counts": {str(code): counts[code] for code in STATUS_HYPOTHESES},
@@ -1687,15 +1790,112 @@ def current_snapshot(website: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def previous_snapshot(master: Dict[str, Any]) -> Dict[str, Any]:
-    value = master.get("current_website_evidence", {}) if isinstance(master, dict) else {}
-    counts = value.get("status_code_counts", {}) if isinstance(value, dict) else {}
+def previous_snapshot(
+    website: Dict[str, Any],
+    monitor_root: Path = MONITOR_ROOT,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    current_id, current_generated_text = website_snapshot_identity(website)
+    current_generated = parse_timestamp(current_generated_text)
+    if current_id is None or current_generated is None:
+        return unavailable_previous_snapshot(
+            "INVALID_CURRENT_SNAPSHOT", "Current monitor snapshot identity is missing or invalid."
+        )
+
+    current_time = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    current_age = (current_time - current_generated).total_seconds()
+    if current_age < -300 or current_age > FRESHNESS_THRESHOLDS_SECONDS["current"]:
+        return unavailable_previous_snapshot(
+            "STALE_CURRENT_SNAPSHOT",
+            "Current monitor snapshot is outside the current evidence freshness window.",
+            current_id,
+            iso_utc(current_generated),
+        )
+
+    comparison, comparison_status = read_monitor_json(
+        monitor_root, current_id, "comparison.json"
+    )
+    if comparison is None:
+        return unavailable_previous_snapshot(
+            "MISSING_PREVIOUS_SNAPSHOT",
+            f"Current monitor comparison is unavailable: {comparison_status}.",
+            current_id,
+            iso_utc(current_generated),
+        )
+
+    comparison_current = parse_timestamp(comparison.get("current_generated_at_utc"))
+    previous_generated = parse_timestamp(comparison.get("previous_generated_at_utc"))
+    if comparison_current != current_generated or previous_generated is None:
+        return unavailable_previous_snapshot(
+            "INVALID_COMPARISON_TIMESTAMP",
+            "Comparison timestamps do not identify the evaluated current and previous monitor runs.",
+            current_id,
+            iso_utc(current_generated),
+        )
+
+    previous_id = previous_generated.strftime("%Y%m%d-%H%M%S")
+    gap_seconds = (current_generated - previous_generated).total_seconds()
+    if previous_id == current_id or gap_seconds <= 0:
+        return unavailable_previous_snapshot(
+            "IDENTICAL_OR_NONMONOTONIC_SNAPSHOT",
+            "The previous snapshot must be distinct and older than the current snapshot.",
+            previous_id,
+            iso_utc(previous_generated),
+        )
+    if gap_seconds > MAX_SNAPSHOT_COMPARISON_GAP_SECONDS:
+        return unavailable_previous_snapshot(
+            "STALE_PREVIOUS_SNAPSHOT",
+            "The previous monitor snapshot is too old for a current delta comparison.",
+            previous_id,
+            iso_utc(previous_generated),
+        )
+
+    metrics, metrics_status = read_monitor_json(monitor_root, previous_id, "metrics.json")
+    raw_status, raw_status_status = read_monitor_json(
+        monitor_root, previous_id, "status-24h.json"
+    )
+    if metrics is None or raw_status is None:
+        unavailable_status = (
+            "MISSING_PREVIOUS_SNAPSHOT"
+            if "missing_or_symlink" in {metrics_status, raw_status_status}
+            else "INVALID_PREVIOUS_SNAPSHOT"
+        )
+        return unavailable_previous_snapshot(
+            unavailable_status,
+            "Previous monitor inputs are incomplete: "
+            f"metrics={metrics_status},status={raw_status_status}.",
+            previous_id,
+            iso_utc(previous_generated),
+        )
+    if parse_timestamp(metrics.get("generated_at_utc")) != previous_generated:
+        return unavailable_previous_snapshot(
+            "INVALID_PREVIOUS_SNAPSHOT",
+            "Previous monitor metadata timestamps do not match the comparison reference.",
+            previous_id,
+            iso_utc(previous_generated),
+        )
+    counts = raw_monitor_status_counts(raw_status)
+    total_5xx = metrics.get("total_5xx")
+    root_504 = metrics.get("root_504")
+    if counts is None or not all(
+        type(value) is int and value >= 0 for value in (total_5xx, root_504)
+    ):
+        return unavailable_previous_snapshot(
+            "INVALID_PREVIOUS_SNAPSHOT",
+            "Previous monitor counters are missing or invalid.",
+            previous_id,
+            iso_utc(previous_generated),
+        )
     return {
-        "generated_at_utc": value.get("generated_at_utc"),
-        "website_status": value.get("website_status"),
-        "total_5xx": value.get("total_5xx"),
-        "status_code_counts": {str(code): as_int(counts.get(str(code))) if str(code) in counts else None for code in STATUS_HYPOTHESES},
-        "root_504": value.get("root_504"),
+        "snapshot_id": previous_id,
+        "generated_at_utc": iso_utc(previous_generated),
+        "website_status": None,
+        "total_5xx": total_5xx,
+        "status_code_counts": counts,
+        "root_504": root_504,
+        "comparison_status": "COMPARABLE",
+        "comparison_reason": "Previous snapshot resolved from the evaluated monitor run's comparison reference.",
+        "source": f"cloudflare-monitor/{previous_id}",
     }
 
 
@@ -1704,7 +1904,7 @@ def build_report() -> Dict[str, Any]:
     discovery = discover_inputs()
     master = load_dict(MASTER_CONSISTENCY_JSON)
     website = load_dict(WEBSITE_JSON)
-    previous = previous_snapshot(master)
+    previous = previous_snapshot(website)
     current = current_snapshot(website)
     deltas = {
         code: {
@@ -1724,8 +1924,8 @@ def build_report() -> Dict[str, Any]:
     evidence = direct_evidence(discovery)
     evidence["level_b_strong_correlation"] = [
         "Current status/path/cache/actor aggregation with per-status detail coverage.",
-        "Independent Phase 10.16 consistency snapshot used only as the previous comparison point.",
-    ] if website and master else []
+        "The previous comparison point is the distinct monitor run referenced by the current run.",
+    ] if website and previous.get("comparison_status") == "COMPARABLE" else []
     if any(item.get("correlation_strength") == "STRONG" for item in ionos.get("synchronized_sequences", [])):
         evidence["level_b_strong_correlation"].append(
             "A synchronized private IONOS path pattern is replicated in current status/path/actor aggregation."
@@ -1756,9 +1956,18 @@ def build_report() -> Dict[str, Any]:
         missing_inputs.append(rel(WEBSITE_JSON))
     if not master:
         missing_inputs.append(rel(MASTER_CONSISTENCY_JSON))
+    if previous.get("comparison_status") != "COMPARABLE":
+        missing_inputs.append(
+            "previous_monitor_snapshot:" + str(previous.get("comparison_status") or "UNKNOWN")
+        )
 
     significant_growth = any(item["trend"] == "SIGNIFICANT_GROWTH" for item in deltas.values())
-    all_current_inputs = bool(website and master and not missing_inputs)
+    all_current_inputs = bool(
+        website
+        and master
+        and previous.get("comparison_status") == "COMPARABLE"
+        and not missing_inputs
+    )
     direct_missing = bool(evidence["missing_evidence"])
     safety = build_safety_block()
     if safety.get("runtime_breach") is True:
@@ -1780,7 +1989,11 @@ def build_report() -> Dict[str, Any]:
         "comparison_scope": {
             "previous_snapshot": previous,
             "current_snapshot": current,
-            "note": "The previous Phase 10.16 snapshot is a comparison point; the newest local website report is the current state.",
+            "note": (
+                "The previous comparison point is resolved from the current monitor run's "
+                "comparison reference. Missing, identical, invalid, or stale snapshots are "
+                "excluded fail-closed."
+            ),
         },
         "total_5xx_delta": total_delta,
         "status_deltas": {str(code): value for code, value in deltas.items()},
@@ -2474,6 +2687,63 @@ def self_test() -> Dict[str, Any]:
         }
     })
     synthetic_safety = build_safety_block()
+    with tempfile.TemporaryDirectory(prefix="sentinel-origin-delta-test-") as temp_name:
+        monitor_root = Path(temp_name)
+        previous_id = "20260907-151539"
+        current_id = "20260907-153059"
+        previous_at = "2026-09-07T15:15:39Z"
+        current_at = "2026-09-07T15:30:59Z"
+        current_dir = monitor_root / current_id
+        current_dir.mkdir()
+        previous_dir = monitor_root / previous_id
+        previous_dir.mkdir()
+        fixtures = {
+            previous_dir / "metrics.json": {
+                "generated_at_utc": previous_at, "total_5xx": 266, "root_504": 11
+            },
+            previous_dir / "status-24h.json": {
+                "data": {"viewer": {"zones": [{"httpRequestsAdaptiveGroups": [
+                    {"count": 99, "dimensions": {"edgeResponseStatus": 503}},
+                    {"count": 167, "dimensions": {"edgeResponseStatus": 504}},
+                ]}]}},
+                "errors": None,
+            },
+        }
+        for path, value in fixtures.items():
+            path.write_text(json.dumps(value), encoding="utf-8")
+        synthetic_website = {
+            "overall_status": "WARNING",
+            "monitor_attempt_context": {"evaluated_run": {
+                "status": "SUCCESS", "run_id": current_id,
+                "generated_at_utc": current_at,
+            }},
+            "metrics": [{"key": "total_5xx", "value": 306}],
+            "origin_pressure_breakdown": {"top_5xx_status_codes": [
+                {"status": 503, "count": 99}, {"status": 504, "count": 207},
+            ]},
+        }
+        comparison_now = datetime(2026, 9, 7, 15, 35, tzinfo=timezone.utc)
+
+        def select_previous(previous_timestamp: str) -> Dict[str, Any]:
+            (current_dir / "comparison.json").write_text(json.dumps({
+                "previous_generated_at_utc": previous_timestamp,
+                "current_generated_at_utc": current_at,
+            }), encoding="utf-8")
+            return previous_snapshot(synthetic_website, monitor_root, comparison_now)
+
+        selected_previous = select_previous(previous_at)
+        selected_current = current_snapshot(synthetic_website)
+        selected_delta = calculate_delta(
+            selected_previous["status_code_counts"]["504"],
+            selected_current["status_code_counts"]["504"],
+        )
+        identical_previous = select_previous(current_at)
+        stale_previous = select_previous("2026-09-07T12:30:59Z")
+        missing_previous = select_previous("2026-09-07T15:20:00Z")
+        invalid_previous = select_previous("invalid")
+        missing_previous_timeline = build_timeline(
+            missing_previous, selected_current, synthetic_website
+        )
     source = Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports: List[str] = []
@@ -2505,6 +2775,35 @@ def self_test() -> Dict[str, Any]:
     tests = {
         "test_a_503_significant_growth": delta_503["delta"] == 142 and delta_503["trend"] == "SIGNIFICANT_GROWTH",
         "test_b_504_decreasing": delta_504["delta"] == -48 and delta_504["trend"] == "DECREASING",
+        "previous_snapshot_uses_distinct_monitor_run": (
+            selected_previous["comparison_status"] == "COMPARABLE"
+            and selected_previous["snapshot_id"] == previous_id
+            and selected_current["snapshot_id"] == current_id
+            and selected_previous["snapshot_id"] != selected_current["snapshot_id"]
+        ),
+        "previous_snapshot_delta_is_current_minus_previous": (
+            selected_delta["previous_count"] == 167
+            and selected_delta["current_count"] == 207
+            and selected_delta["delta"] == 40
+            and selected_delta["trend"] == "SIGNIFICANT_GROWTH"
+        ),
+        "missing_previous_snapshot_fails_closed": (
+            missing_previous["comparison_status"] == "MISSING_PREVIOUS_SNAPSHOT"
+            and missing_previous["status_code_counts"]["504"] is None
+            and missing_previous_timeline["peak_growth_at"] is None
+        ),
+        "identical_previous_snapshot_fails_closed": (
+            identical_previous["comparison_status"] == "IDENTICAL_OR_NONMONOTONIC_SNAPSHOT"
+            and identical_previous["status_code_counts"]["504"] is None
+        ),
+        "stale_previous_snapshot_fails_closed": (
+            stale_previous["comparison_status"] == "STALE_PREVIOUS_SNAPSHOT"
+            and stale_previous["status_code_counts"]["504"] is None
+        ),
+        "invalid_previous_timestamp_fails_closed": (
+            invalid_previous["comparison_status"] == "INVALID_COMPARISON_TIMESTAMP"
+            and invalid_previous["status_code_counts"]["504"] is None
+        ),
         "test_b_503_not_overridden": synthetic_priority["selected_detail_priority"] == "ORIGIN_503_GROWTH_DIAGNOSIS",
         "test_c_tls_review": (
             synthetic_tls["status"] == "TLS_REVIEW_REQUIRED"
