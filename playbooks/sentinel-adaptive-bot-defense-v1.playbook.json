@@ -1,0 +1,96 @@
+{
+  "allowed_simulated_action": "TEMPORARY_MANAGED_CHALLENGE",
+  "budgets": {
+    "cooldown_minutes": 30,
+    "max_actions_per_day": 4,
+    "max_actions_per_hour": 1,
+    "max_active_rules": 1,
+    "rule_ttl_minutes": 10
+  },
+  "challenge_target": {
+    "action_contract": "temporary_scanner_managed_challenge_v1",
+    "model": "BEHAVIORAL_PHP_SCANNER_WITH_EXACT_REGISTERED_STATIC_PATH_SCOPE",
+    "rule_scope_may_use": [
+      "existing_registered_static_scanner_paths"
+    ],
+    "rule_scope_must_not_use": [
+      "user_agent_only",
+      "country",
+      "asn",
+      "broad_ip",
+      "normal_browser",
+      "verified_search_bot_identity"
+    ]
+  },
+  "classification_model": [
+    "VERIFIED_SEARCH_BOT",
+    "KNOWN_COMMERCIAL_CRAWLER",
+    "SECURITY_SCANNER",
+    "UNKNOWN_AUTOMATION",
+    "BEHAVIORAL_PHP_SCANNER",
+    "NORMAL_BROWSER"
+  ],
+  "design_id": "SENTINEL_BOT_DEFENSE_V1",
+  "fail_closed_conditions": [
+    "evidence_missing_or_stale",
+    "legitimate_path_use_unknown",
+    "false_positive_risk_not_low",
+    "shared_or_nat_source_risk",
+    "website_status_not_ok",
+    "circuit_breaker_not_armed",
+    "breach_true",
+    "owner_policy_not_allowed",
+    "scope_outside_existing_action_allowlist",
+    "fewer_than_four_independent_behavioral_signals"
+  ],
+  "false_positive_protection": [
+    "verified_search_identity_hard_negative_gate",
+    "user_agent_alone_never_authorizes_action",
+    "normal_wp_login_get_preserved",
+    "named_crawler_analytics_is_monitor_only",
+    "shared_nat_risk_blocks_action",
+    "unknown_legitimate_use_blocks_action"
+  ],
+  "mode": "DESIGN_SIMULATION_ONLY",
+  "monitor_only": [
+    "wp_login_post_burst_until_action_specific_adapter_is_reviewed",
+    "random_php_scanner_paths_outside_existing_live_allowlist",
+    "meta_webindexer_without_independent_harm_evidence",
+    "cms_security_auditor_without_independent_harm_evidence",
+    "dataforseo_without_independent_harm_evidence",
+    "sitelock_without_proven_failure_correlation"
+  ],
+  "permanent_blocking_allowed": false,
+  "pipeline": [
+    "OBSERVE",
+    "CLASSIFY",
+    "SCORE",
+    "SIMULATE",
+    "TEMPORARY_CHALLENGE",
+    "VERIFY",
+    "AUTO_ROLLBACK_OR_EXPIRE"
+  ],
+  "required_behavioral_signals": [
+    "unusual_php_or_wordpress_paths",
+    "request_velocity",
+    "suspicious_path_diversity",
+    "404_403_429_503_failure_correlation",
+    "repeated_source_or_actor_group_correlation",
+    "http_method_and_success_failure_ratio"
+  ],
+  "runtime_flags": {
+    "high": false,
+    "low_live": false,
+    "medium": false,
+    "production_mutation": false
+  },
+  "user_agent_only_action_allowed": false,
+  "verification": [
+    "normal_browser_impact",
+    "legitimate_bot_impact",
+    "login_access_impact",
+    "five_xx_impact",
+    "false_positive_risk",
+    "rollback_ready"
+  ]
+}
